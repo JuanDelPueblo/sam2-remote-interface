@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
+import os
+from matplotlib import patches
 
 
 def show_mask(mask, ax, random_color=False, borders=True):
@@ -34,11 +36,30 @@ def show_points(coords, labels, ax, marker_size=375):
 def show_box(box, ax):
     x0, y0 = box[0], box[1]
     w, h = box[2] - box[0], box[3] - box[1]
-    ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green',
+    ax.add_patch(patches.Rectangle((x0, y0), w, h, edgecolor='green',
                  facecolor=(0, 0, 0, 0), lw=2))
 
 
-def show_masks(image, masks, scores, point_coords=None, box_coords=None, input_labels=None, borders=True):
+def show_masks(image, masks, scores, point_coords=None, box_coords=None, input_labels=None, borders=True, out_dir=None, prefix="mask"):
+    """
+    Render and save mask overlay images.
+
+    Parameters:
+    - image: numpy array (H,W,3) RGB image to display under masks
+    - masks: iterable of binary numpy arrays (H,W) for each mask
+    - scores: iterable of floats corresponding to each mask
+    - point_coords, box_coords, input_labels: optional annotations to render
+    - borders: whether to draw contours around masks
+    - out_dir: directory where images are saved; defaults to '<repo>/images'
+    - prefix: filename prefix for saved images
+
+    Returns: list of absolute file paths for the saved images
+    """
+    if out_dir is None:
+        out_dir = os.path.join(os.path.dirname(__file__), "images")
+    os.makedirs(out_dir, exist_ok=True)
+
+    saved_paths = []
     for i, (mask, score) in enumerate(zip(masks, scores)):
         plt.figure(figsize=(10, 10))
         plt.imshow(image)
@@ -52,4 +73,9 @@ def show_masks(image, masks, scores, point_coords=None, box_coords=None, input_l
         if len(scores) > 1:
             plt.title(f"Mask {i+1}, Score: {score:.3f}", fontsize=18)
         plt.axis('off')
-        plt.show()
+        out_path = os.path.join(out_dir, f"{prefix}_{i+1}.png")
+        plt.savefig(out_path)
+        plt.close()
+        saved_paths.append(os.path.abspath(out_path))
+
+    return saved_paths

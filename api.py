@@ -1,12 +1,20 @@
 from typing import Optional
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, Request
 from pydantic import BaseModel
 import numpy as np
 from PIL import Image
 import sam2_image_masker as sim
 from utils import *
+import os
+import time
+import secrets
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
+
+# Mount static serving for generated mask images
+IMAGES_DIR = os.path.join(os.path.dirname(__file__), "images")
+app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
 
 masker = sim.SAM2ImageMasker()
 image = None  # Global variable to store the current image
@@ -33,7 +41,10 @@ async def set_image(request: UploadFile = File(...)):
 
 
 @app.post("/get_masks")
-async def get_masks(points: Points):
+async def get_masks(points: Points, request: Request):
+    global image
+    if image is None:
+        return {"error": "No image set. Call /set_image first."}
     point_coords = None
     point_labels = None
     multimask_output = points.multimask_output
@@ -49,11 +60,23 @@ async def get_masks(points: Points):
     # Convert masks to list of lists for JSON serialization
     masks_list = [mask.tolist() for mask in masks]
 
-    show_masks(image=image, masks=masks, scores=scores,
-               point_coords=point_coords, box_coords=None, input_labels=point_labels, borders=True)
+    # Save overlay images and return them as static URLs
+    # Create a unique prefix to avoid clashes across requests
+    prefix = f"mask_{int(time.time())}_{secrets.token_hex(4)}"
+    saved_paths = show_masks(image=image, masks=masks, scores=scores,
+                             point_coords=point_coords, box_coords=None, input_labels=point_labels, borders=True,
+                             out_dir=os.path.join(os.path.dirname(__file__), "images"), prefix=prefix)
+
+    # Build public URLs for each saved image
+    mask_image_urls = []
+    for p in saved_paths:
+        filename = os.path.basename(p)
+        url = str(request.url_for("images", path=filename))
+        mask_image_urls.append(url)
 
     return {
         "masks": masks_list,
         "scores": scores.tolist(),
-        "logits": logits.tolist()
+        "logits": logits.tolist(),
+        "mask_image_urls": mask_image_urls
     }
