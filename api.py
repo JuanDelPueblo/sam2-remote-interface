@@ -30,6 +30,12 @@ class Points(BaseModel):
 async def root():
     return {"message": "SAM 2 Image Masker API"}
 
+@app.get("/status")
+async def status():
+    if masker.sam2_model is None:
+        return {"status": "not ok", "device": None}
+    
+    return {"status": "ok", "device": masker.device.type}
 
 @app.post("/set_image")
 async def set_image(request: UploadFile = File(...)):
@@ -80,3 +86,8 @@ async def get_masks(points: Points, request: Request):
         "logits": logits.tolist(),
         "mask_image_urls": mask_image_urls
     }
+
+@app.post("/reset_predictor")
+async def reset_predictor():
+    masker.predictor.reset_predictor()
+    return {"message": "Predictor reset successfully"}
