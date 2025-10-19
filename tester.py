@@ -95,15 +95,15 @@ def run_tests():
     test_cases = [
         {
             "name": "single_point",
-            "payload": {"point_coords": [[500, 375]], "point_labels": [1], "multimask_output": False}
+            "payload": {"point_coords": [[500, 375]], "point_labels": [1], "multimask_output": False, "return_masked_images": True}
         },
         {
             "name": "single_box",
-            "payload": {"input_boxes": [[425, 600, 700, 875]], "multimask_output": False}
+            "payload": {"input_boxes": [[425, 600, 700, 875]], "multimask_output": False, "return_masked_images": True}
         },
         {
             "name": "point_and_box",
-            "payload": {"point_coords": [[500, 375]], "point_labels": [1], "input_boxes": [[425, 600, 700, 875]], "multimask_output": False}
+            "payload": {"point_coords": [[575, 750]], "point_labels": [1], "input_boxes": [[425, 600, 700, 875]], "multimask_output": False, "return_masked_images": True}
         }
     ]
 

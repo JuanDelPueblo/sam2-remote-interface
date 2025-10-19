@@ -18,6 +18,7 @@ class ImagePredictorRequest(BaseModel):
     point_labels: Optional[list[int]] = None
     input_boxes: Optional[list[list[float]]] = None
     multimask_output: bool = False
+    return_masked_images: bool = False
 
 
 @app.get("/")
@@ -51,6 +52,7 @@ async def get_masks(points: ImagePredictorRequest, request: Request):
     point_labels = None
     input_boxes = None
     multimask_output = points.multimask_output
+    return_masked_images = points.return_masked_images
 
     if points.point_coords is not None:
         point_coords = np.array(points.point_coords)
@@ -63,6 +65,13 @@ async def get_masks(points: ImagePredictorRequest, request: Request):
         point_coords=point_coords, point_labels=point_labels, input_boxes=input_boxes, multimask_output=multimask_output)
 
     masks_list = [mask.tolist() for mask in masks]
+
+    if not return_masked_images:
+        return {
+            "masks": masks_list,
+            "scores": scores.tolist(),
+            "logits": logits.tolist()
+        }
 
     mask_images = show_masks(image=image, masks=masks, scores=scores,
                              point_coords=point_coords, box_coords=input_boxes, input_labels=point_labels, borders=True)
