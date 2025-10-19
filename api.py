@@ -5,19 +5,12 @@ import numpy as np
 from PIL import Image
 import sam2_image_masker as sim
 from utils import *
-import os
-import time
-import secrets
-from fastapi.staticfiles import StaticFiles
+import base64
 
 app = FastAPI()
 
-# Mount static serving for generated mask images
-IMAGES_DIR = os.path.join(os.path.dirname(__file__), "images")
-app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
-
 masker = sim.SAM2ImageMasker()
-image = None  # Global variable to store the current image
+image = None
 
 
 class ImagePredictorRequest(BaseModel):
@@ -31,12 +24,14 @@ class ImagePredictorRequest(BaseModel):
 async def root():
     return {"message": "SAM 2 Image Masker API"}
 
+
 @app.get("/status")
 async def status():
     if masker.sam2_model is None:
         return {"status": "not ok", "device": None}
-    
+
     return {"status": "ok", "device": masker.device.type}
+
 
 @app.post("/set_image")
 async def set_image(request: UploadFile = File(...)):
@@ -67,29 +62,21 @@ async def get_masks(points: ImagePredictorRequest, request: Request):
     masks, scores, logits = masker.get_masks(
         point_coords=point_coords, point_labels=point_labels, input_boxes=input_boxes, multimask_output=multimask_output)
 
-    # Convert masks to list of lists for JSON serialization
     masks_list = [mask.tolist() for mask in masks]
 
-    # Save overlay images and return them as static URLs
-    # Create a unique prefix to avoid clashes across requests
-    prefix = f"mask_{int(time.time())}_{secrets.token_hex(4)}"
-    saved_paths = show_masks(image=image, masks=masks, scores=scores,
-                             point_coords=point_coords, box_coords=input_boxes, input_labels=point_labels, borders=True,
-                             out_dir=os.path.join(os.path.dirname(__file__), "images"), prefix=prefix)
+    mask_images = show_masks(image=image, masks=masks, scores=scores,
+                             point_coords=point_coords, box_coords=input_boxes, input_labels=point_labels, borders=True)
 
-    # Build public URLs for each saved image
-    mask_image_urls = []
-    for p in saved_paths:
-        filename = os.path.basename(p)
-        url = str(request.url_for("images", path=filename))
-        mask_image_urls.append(url)
+    mask_images_base64 = [base64.b64encode(
+        img).decode('utf-8') for img in mask_images]
 
     return {
         "masks": masks_list,
         "scores": scores.tolist(),
         "logits": logits.tolist(),
-        "mask_image_urls": mask_image_urls
+        "mask_images_base64": mask_images_base64
     }
+
 
 @app.post("/reset_predictor")
 async def reset_predictor():

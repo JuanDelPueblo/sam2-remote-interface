@@ -10,16 +10,6 @@ os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
 
 class SAM2ImageMasker:
-    """
-    Wrapper around SAM2 that loads the model/predictor and exposes a method
-    to get masks for a given image.
-
-    Parameters:
-    - checkpoint: path to sam2 checkpoint (default same as original script)
-    - model_cfg: model config path (default same as original script)
-    - device: torch device or string ("cuda"/"mps"/"cpu"). If None, auto-detect.
-    """
-
     def __init__(self, checkpoint="./checkpoints/sam2.1_hiera_large.pt", model_cfg="configs/sam2.1/sam2.1_hiera_l.yaml"):
         if torch.cuda.is_available():
             self.device = torch.device("cuda")
@@ -44,7 +34,6 @@ class SAM2ImageMasker:
 
         np.random.seed(3)
 
-        # build model and predictor
         self.sam2_model = build_sam2(model_cfg, checkpoint, device=self.device)
         self.predictor = SAM2ImagePredictor(self.sam2_model)
 
@@ -52,18 +41,6 @@ class SAM2ImageMasker:
         self.predictor.set_image(image)
 
     def get_masks(self, point_coords=None, point_labels=None, input_boxes=None, multimask_output=False):
-        """
-        Return (masks, scores, logits) sorted by score desc.
-
-        Parameters:
-        - point_coords: numpy array of shape (N,2) or None (defaults to [[500,375]])
-        - point_labels: numpy array of shape (N,) or None (defaults to [1])
-        - input_boxes: numpy array of shape (M,4) or None (defaults to [[425,600,700,875]])
-        - multimask_output: bool
-
-        Returns:
-        (masks, scores, logits) where masks is a numpy array of shape (M, H, W)
-        """
         masks, scores, logits = self.predictor.predict(
             point_coords=point_coords,
             point_labels=point_labels,

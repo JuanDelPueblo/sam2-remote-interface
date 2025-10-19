@@ -1,13 +1,9 @@
 import numpy as np
-import matplotlib.pyplot as plt
 import cv2
-import os
-from matplotlib import patches
 
 
 def show_mask(image, mask, random_color=False, borders=True):
     if random_color:
-        # OpenCV uses BGR, not RGB, and values are 0-255
         color = np.random.randint(0, 256, 3, dtype=np.uint8)
     else:
         color = np.array([255, 144, 30], dtype=np.uint8)  # BGR for blue
@@ -49,9 +45,9 @@ def show_box(image, boxes):
     return image
 
 
-def show_masks(image, masks, scores, point_coords=None, box_coords=None, input_labels=None, borders=True, out_dir=None, prefix="mask"):
+def show_masks(image, masks, scores, point_coords=None, box_coords=None, input_labels=None, borders=True):
     """
-    Render and save mask overlay images using OpenCV.
+    Render mask overlay images using OpenCV and return them as byte arrays.
 
     Parameters:
     - image: numpy array (H,W,3) RGB image to display under masks
@@ -59,16 +55,10 @@ def show_masks(image, masks, scores, point_coords=None, box_coords=None, input_l
     - scores: iterable of floats corresponding to each mask
     - point_coords, box_coords, input_labels: optional annotations to render
     - borders: whether to draw contours around masks
-    - out_dir: directory where images are saved; defaults to '<repo>/images'
-    - prefix: filename prefix for saved images
 
-    Returns: list of absolute file paths for the saved images
+    Returns: list of byte arrays, each containing a PNG-encoded image
     """
-    if out_dir is None:
-        out_dir = os.path.join(os.path.dirname(__file__), "images")
-    os.makedirs(out_dir, exist_ok=True)
-
-    saved_paths = []
+    output_images = []
     # Convert image to BGR for OpenCV
     image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
@@ -77,23 +67,25 @@ def show_masks(image, masks, scores, point_coords=None, box_coords=None, input_l
         output_image = image_bgr.copy()
 
         # Apply mask
-        output_image = show_mask(output_image, mask, random_color=True, borders=borders)
+        output_image = show_mask(
+            output_image, mask, random_color=True, borders=borders)
 
         # Draw points and boxes if they exist
         if point_coords is not None:
             assert input_labels is not None
-            output_image = show_points(output_image, point_coords, input_labels)
+            output_image = show_points(
+                output_image, point_coords, input_labels)
         if box_coords is not None:
             output_image = show_box(output_image, box_coords)
 
         # Add score text
         if len(scores) > 1:
             text = f"Mask {i+1}, Score: {score:.3f}"
-            cv2.putText(output_image, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.putText(output_image, text, (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-        # Save the image
-        out_path = os.path.join(out_dir, f"{prefix}_{i+1}.png")
-        cv2.imwrite(out_path, output_image)
-        saved_paths.append(os.path.abspath(out_path))
+        # Encode the image to a byte array
+        _, buffer = cv2.imencode('.png', output_image)
+        output_images.append(buffer.tobytes())
 
-    return saved_paths
+    return output_images
