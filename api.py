@@ -20,9 +20,10 @@ masker = sim.SAM2ImageMasker()
 image = None  # Global variable to store the current image
 
 
-class Points(BaseModel):
+class ImagePredictorRequest(BaseModel):
     point_coords: Optional[list[list[float]]] = None
     point_labels: Optional[list[int]] = None
+    input_boxes: Optional[list[list[float]]] = None
     multimask_output: bool = True
 
 
@@ -47,21 +48,24 @@ async def set_image(request: UploadFile = File(...)):
 
 
 @app.post("/get_masks")
-async def get_masks(points: Points, request: Request):
+async def get_masks(points: ImagePredictorRequest, request: Request):
     global image
     if image is None:
         return {"error": "No image set. Call /set_image first."}
     point_coords = None
     point_labels = None
+    input_boxes = None
     multimask_output = points.multimask_output
 
     if points.point_coords is not None:
         point_coords = np.array(points.point_coords)
     if points.point_labels is not None:
         point_labels = np.array(points.point_labels)
+    if points.input_boxes is not None:
+        input_boxes = np.array(points.input_boxes)
 
     masks, scores, logits = masker.get_masks(
-        point_coords=point_coords, point_labels=point_labels, multimask_output=multimask_output)
+        point_coords=point_coords, point_labels=point_labels, input_boxes=input_boxes, multimask_output=multimask_output)
 
     # Convert masks to list of lists for JSON serialization
     masks_list = [mask.tolist() for mask in masks]
@@ -70,7 +74,7 @@ async def get_masks(points: Points, request: Request):
     # Create a unique prefix to avoid clashes across requests
     prefix = f"mask_{int(time.time())}_{secrets.token_hex(4)}"
     saved_paths = show_masks(image=image, masks=masks, scores=scores,
-                             point_coords=point_coords, box_coords=None, input_labels=point_labels, borders=True,
+                             point_coords=point_coords, box_coords=input_boxes, input_labels=point_labels, borders=True,
                              out_dir=os.path.join(os.path.dirname(__file__), "images"), prefix=prefix)
 
     # Build public URLs for each saved image

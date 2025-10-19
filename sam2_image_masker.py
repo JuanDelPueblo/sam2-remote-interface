@@ -82,7 +82,7 @@ class SAM2ImageMasker:
         image_np = self._prepare_image(image)
         self.predictor.set_image(image_np)
 
-    def get_masks(self, point_coords=None, point_labels=None, multimask_output=True):
+    def get_masks(self, point_coords=None, point_labels=None, input_boxes=None, multimask_output=True):
         """
         Return (masks, scores, logits) sorted by score desc.
 
@@ -98,10 +98,13 @@ class SAM2ImageMasker:
             point_coords = np.array([[500, 375]])
         if point_labels is None:
             point_labels = np.array([1])
+        if input_boxes is None:
+            input_boxes = np.array([[425, 600, 700, 875]])
 
         masks, scores, logits = self.predictor.predict(
             point_coords=point_coords,
             point_labels=point_labels,
+            box=input_boxes,
             multimask_output=multimask_output,
         )
 
