@@ -5,44 +5,53 @@ import os
 from matplotlib import patches
 
 
-def show_mask(mask, ax, random_color=False, borders=True):
+def show_mask(image, mask, random_color=False, borders=True):
     if random_color:
-        color = np.concatenate([np.random.random(3), np.array([0.6])], axis=0)
+        # OpenCV uses BGR, not RGB, and values are 0-255
+        color = np.random.randint(0, 256, 3, dtype=np.uint8)
     else:
-        color = np.array([30/255, 144/255, 255/255, 0.6])
+        color = np.array([255, 144, 30], dtype=np.uint8)  # BGR for blue
+    
     h, w = mask.shape[-2:]
-    mask = mask.astype(np.uint8)
-    mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
+    mask_bool = mask.astype(bool)
+
+    # Create a colored mask
+    color_mask = np.zeros((h, w, 3), dtype=np.uint8)
+    color_mask[mask_bool] = color
+
+    # Blend the colored mask with the original image
+    # The alpha channel is simulated by weighting
+    image[mask_bool] = cv2.addWeighted(image[mask_bool], 0.5, color_mask[mask_bool], 0.5, 0)
+
     if borders:
         contours, _ = cv2.findContours(
-            mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-        # Try to smooth contours
-        contours = [cv2.approxPolyDP(
-            contour, epsilon=0.01, closed=True) for contour in contours]
-        mask_image = cv2.drawContours(
-            mask_image, contours, -1, (1, 1, 1, 0.5), thickness=2)
-    ax.imshow(mask_image)
+            mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(image, contours, -1, (255, 255, 255), thickness=2)
+    return image
 
 
-def show_points(coords, labels, ax, marker_size=375):
+def show_points(image, coords, labels, marker_size=20):
     pos_points = coords[labels == 1]
     neg_points = coords[labels == 0]
-    ax.scatter(pos_points[:, 0], pos_points[:, 1], color='green',
-               marker='*', s=marker_size, edgecolor='white', linewidth=1.25)
-    ax.scatter(neg_points[:, 0], neg_points[:, 1], color='red',
-               marker='*', s=marker_size, edgecolor='white', linewidth=1.25)
+    for p in pos_points:
+        cv2.drawMarker(image, (int(p[0]), int(p[1])), color=(0, 255, 0), markerType=cv2.MARKER_STAR,
+                       markerSize=marker_size, thickness=2)
+    for p in neg_points:
+        cv2.drawMarker(image, (int(p[0]), int(p[1])), color=(0, 0, 255), markerType=cv2.MARKER_STAR,
+                       markerSize=marker_size, thickness=2)
+    return image
 
 
-def show_box(box, ax):
-    x0, y0 = box[0], box[1]
-    w, h = box[2] - box[0], box[3] - box[1]
-    ax.add_patch(patches.Rectangle((x0, y0), w, h, edgecolor='green',
-                 facecolor=(0, 0, 0, 0), lw=2))
+def show_box(image, boxes):
+    for box in boxes:
+        x0, y0, x1, y1 = map(int, box)
+        cv2.rectangle(image, (x0, y0), (x1, y1), (0, 255, 0), 2)
+    return image
 
 
 def show_masks(image, masks, scores, point_coords=None, box_coords=None, input_labels=None, borders=True, out_dir=None, prefix="mask"):
     """
-    Render and save mask overlay images.
+    Render and save mask overlay images using OpenCV.
 
     Parameters:
     - image: numpy array (H,W,3) RGB image to display under masks
@@ -60,22 +69,31 @@ def show_masks(image, masks, scores, point_coords=None, box_coords=None, input_l
     os.makedirs(out_dir, exist_ok=True)
 
     saved_paths = []
+    # Convert image to BGR for OpenCV
+    image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
     for i, (mask, score) in enumerate(zip(masks, scores)):
-        plt.figure(figsize=(10, 10))
-        plt.imshow(image)
-        show_mask(mask, plt.gca(), borders=borders)
+        # Create a fresh copy for each mask's image
+        output_image = image_bgr.copy()
+
+        # Apply mask
+        output_image = show_mask(output_image, mask, random_color=True, borders=borders)
+
+        # Draw points and boxes if they exist
         if point_coords is not None:
             assert input_labels is not None
-            show_points(point_coords, input_labels, plt.gca())
+            output_image = show_points(output_image, point_coords, input_labels)
         if box_coords is not None:
-            # boxes
-            show_box(box_coords, plt.gca())
+            output_image = show_box(output_image, box_coords)
+
+        # Add score text
         if len(scores) > 1:
-            plt.title(f"Mask {i+1}, Score: {score:.3f}", fontsize=18)
-        plt.axis('off')
+            text = f"Mask {i+1}, Score: {score:.3f}"
+            cv2.putText(output_image, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
+        # Save the image
         out_path = os.path.join(out_dir, f"{prefix}_{i+1}.png")
-        plt.savefig(out_path)
-        plt.close()
+        cv2.imwrite(out_path, output_image)
         saved_paths.append(os.path.abspath(out_path))
 
     return saved_paths

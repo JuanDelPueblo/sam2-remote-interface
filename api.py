@@ -24,7 +24,7 @@ class ImagePredictorRequest(BaseModel):
     point_coords: Optional[list[list[float]]] = None
     point_labels: Optional[list[int]] = None
     input_boxes: Optional[list[list[float]]] = None
-    multimask_output: bool = True
+    multimask_output: bool = False
 
 
 @app.get("/")
