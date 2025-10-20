@@ -1,4 +1,3 @@
-
 import base64
 import os
 import subprocess
@@ -6,13 +5,15 @@ import time
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
+import json
 
 import requests
 from PIL import Image
 
 # Configuration
 BASE_URL = "http://127.0.0.1:8000"
-IMAGE_PATH = "truck.jpg"
+IMAGE_1_PATH = "truck.jpg"
+IMAGE_2_PATH = "groceries.jpg"
 OUTPUT_DIR = Path("images")
 API_FILE = "api.py"
 
@@ -45,6 +46,26 @@ def set_image(image_path):
         print(f"Image '{image_path}' set successfully.")
     else:
         print(f"Failed to set image. Status: {response.status_code}, Response: {response.text}")
+    return response.status_code == 200
+
+
+def set_image_batch(image_paths):
+    """Calls the /set_image_batch endpoint."""
+    url = f"{BASE_URL}/set_image_batch"
+    files = []
+    for image_path in image_paths:
+        files.append(('requests', (os.path.basename(image_path), open(image_path, 'rb'), 'image/jpeg')))
+    
+    response = requests.post(url, files=files)
+    
+    # Close the files
+    for _, file_tuple in files:
+        file_tuple[1].close()
+
+    if response.status_code == 200:
+        print(f"Image batch set successfully.")
+    else:
+        print(f"Failed to set image batch. Status: {response.status_code}, Response: {response.text}")
     return response.status_code == 200
 
 
@@ -89,6 +110,41 @@ def reset_predictor():
         print(f"Failed to reset predictor. Status: {response.status_code}, Response: {response.text}")
 
 
+def get_masks_batch(data, test_name):
+    """Calls the /get_masks_batch endpoint and saves the returned masks."""
+    url = f"{BASE_URL}/get_masks_batch"
+    response = requests.post(url, json=data)
+
+    if response.status_code == 200:
+        response_data = response.json()
+        masks_batch_data = response_data.get("mask_images_base64_batch", [])
+        print(f"Test '{test_name}': Successfully retrieved {len(masks_batch_data)} batches of masks.")
+        
+        for i, masks_data in enumerate(masks_batch_data):
+            print(f"  Processing batch {i+1} with {len(masks_data)} masks.")
+            for j, mask_b64 in enumerate(masks_data):
+                try:
+                    # Decode the base64 string
+                    mask_bytes = base64.b64decode(mask_b64)
+                    
+                    # Create an image from the bytes
+                    mask_image = Image.open(BytesIO(mask_bytes))
+                    
+                    # Generate a unique filename
+                    timestamp = int(datetime.now().timestamp())
+                    filename = f"mask_{timestamp}_{test_name}_batch{i+1}_{j+1}.png"
+                    output_path = OUTPUT_DIR / filename
+                    
+                    # Save the image
+                    mask_image.save(output_path)
+                    print(f"    Saved mask to '{output_path}'")
+
+                except Exception as e:
+                    print(f"    Error processing mask for test '{test_name}', batch {i+1}: {e}")
+    else:
+        print(f"Test '{test_name}': Failed to get batch masks. Status: {response.status_code}, Response: {response.text}")
+
+
 def run_tests():
     """Runs the full test suite."""
     # Test cases
@@ -111,7 +167,7 @@ def run_tests():
         print(f"\n--- Running test: {test['name']} ---")
         
         # 1. Set the image for the test
-        if not set_image(IMAGE_PATH):
+        if not set_image(IMAGE_1_PATH):
             continue # Skip to next test if image setting fails
             
         # 2. Get the mask
@@ -121,6 +177,30 @@ def run_tests():
         reset_predictor()
         
         time.sleep(1) # Small delay between tests
+
+    # --- Batch Test ---
+    print("\n--- Running test: batch_points ---")
+    batch_test_case = {
+        "name": "batch_points",
+        "payload": {
+            "items": [
+                {
+                    "point_coords": [[[500, 375]], [[650, 750]]],
+                    "point_labels": [[1], [1]]
+                },
+                {
+                    "point_coords": [[[400, 300]], [[630, 300]]],
+                    "point_labels": [[1], [1]]
+                }
+            ],
+            "multimask_output": False
+        }
+    }
+    # Using the same image twice for the batch
+    set_image_batch([IMAGE_1_PATH, IMAGE_2_PATH])
+    get_masks_batch(batch_test_case["payload"], batch_test_case["name"])
+    reset_predictor()
+    time.sleep(1)
 
 
 if __name__ == "__main__":

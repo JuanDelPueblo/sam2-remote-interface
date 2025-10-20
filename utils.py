@@ -7,7 +7,15 @@ def show_mask(image, mask, random_color=False, borders=True):
         color = np.random.randint(0, 256, 3, dtype=np.uint8)
     else:
         color = np.array([255, 144, 30], dtype=np.uint8)  # BGR for blue
-    
+
+    mask = np.asarray(mask)
+    mask = np.squeeze(mask)
+
+    if mask.ndim != 2:
+        raise ValueError(
+            f"Expected 2D mask after squeeze, got shape {mask.shape}"
+        )
+
     h, w = mask.shape[-2:]
     mask_bool = mask.astype(bool)
 
@@ -80,7 +88,12 @@ def show_masks(image, masks, scores, point_coords=None, box_coords=None, input_l
 
         # Add score text
         if len(scores) > 1:
-            text = f"Mask {i+1}, Score: {score:.3f}"
+            score_array = np.asarray(score)
+            if score_array.size == 0:
+                score_value = float("nan")
+            else:
+                score_value = float(score_array.reshape(-1)[0])
+            text = f"Mask {i+1}, Score: {score_value:.3f}"
             cv2.putText(output_image, text, (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 

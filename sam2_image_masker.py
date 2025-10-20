@@ -40,7 +40,10 @@ class SAM2ImageMasker:
     def set_image(self, image):
         self.predictor.set_image(image)
 
-    def get_masks(self, point_coords=None, point_labels=None, input_boxes=None, multimask_output=False):
+    def set_image_batch(self, images):
+        self.predictor.set_image_batch(images)
+
+    def predict(self, point_coords=None, point_labels=None, input_boxes=None, multimask_output=False):
         masks, scores, logits = self.predictor.predict(
             point_coords=point_coords,
             point_labels=point_labels,
@@ -53,3 +56,13 @@ class SAM2ImageMasker:
         scores = scores[sorted_ind]
         logits = logits[sorted_ind]
         return masks, scores, logits
+
+    def predict_batch(self, point_coords_batch=None, point_labels_batch=None, input_boxes_batch=None, multimask_output=False):
+        masks_batch, scores_batch, logits_batch = self.predictor.predict_batch(
+            point_coords_batch=point_coords_batch,
+            point_labels_batch=point_labels_batch,
+            box_batch=input_boxes_batch,
+            multimask_output=multimask_output,
+        )
+
+        return masks_batch, scores_batch, logits_batch
