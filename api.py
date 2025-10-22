@@ -37,7 +37,7 @@ async def root():
     return {"message": "SAM 2 Image Masker API"}
 
 
-@app.get("/status")
+@app.get("/image/status")
 async def status():
     if masker.sam2_model is None:
         return {"status": "not ok", "device": None}
@@ -45,7 +45,7 @@ async def status():
     return {"status": "ok", "device": masker.device.type}
 
 
-@app.post("/set_image")
+@app.post("/image/set_image")
 async def set_image(request: UploadFile = File(...)):
     global image
     image = Image.open(request.file)
@@ -53,7 +53,7 @@ async def set_image(request: UploadFile = File(...)):
     masker.set_image(image)
     return {"message": "Image set successfully"}
 
-@app.post("/set_image_batch")
+@app.post("/image/set_image_batch")
 async def set_image_batch(requests: list[UploadFile] = File(...)):
     global images
     images = []
@@ -63,7 +63,7 @@ async def set_image_batch(requests: list[UploadFile] = File(...)):
     masker.set_image_batch(images)
     return {"message": "Image batch set successfully"}
 
-@app.post("/get_masks")
+@app.post("/image/get_masks")
 async def get_masks(points: ImagePredictorRequest):
     global image
     if image is None:
@@ -106,7 +106,7 @@ async def get_masks(points: ImagePredictorRequest):
         "mask_images_base64": mask_images_base64
     }
 
-@app.post("/get_masks_batch")
+@app.post("/image/get_masks_batch")
 async def get_masks_batch(
     data: ImageBatchPredictorRequest
 ):
@@ -151,7 +151,7 @@ async def get_masks_batch(
         "mask_images_base64_batch": mask_images_base64_batch
     }
 
-@app.post("/reset_predictor")
+@app.post("/image/reset_predictor")
 async def reset_predictor():
     masker.predictor.reset_predictor()
     return {"message": "Predictor reset successfully"}

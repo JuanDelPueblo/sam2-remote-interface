@@ -38,7 +38,7 @@ def wait_for_server(url, timeout=30):
 
 def set_image(image_path):
     """Calls the /set_image endpoint."""
-    url = f"{BASE_URL}/set_image"
+    url = f"{BASE_URL}/image/set_image"
     with open(image_path, "rb") as f:
         files = {"request": (os.path.basename(image_path), f, "image/jpeg")}
         response = requests.post(url, files=files)
@@ -51,7 +51,7 @@ def set_image(image_path):
 
 def set_image_batch(image_paths):
     """Calls the /set_image_batch endpoint."""
-    url = f"{BASE_URL}/set_image_batch"
+    url = f"{BASE_URL}/image/set_image_batch"
     files = []
     for image_path in image_paths:
         files.append(('requests', (os.path.basename(image_path), open(image_path, 'rb'), 'image/jpeg')))
@@ -71,7 +71,7 @@ def set_image_batch(image_paths):
 
 def get_masks(data, test_name):
     """Calls the /get_masks endpoint and saves the returned masks."""
-    url = f"{BASE_URL}/get_masks"
+    url = f"{BASE_URL}/image/get_masks"
     response = requests.post(url, json=data)
 
     if response.status_code == 200:
@@ -102,7 +102,7 @@ def get_masks(data, test_name):
 
 def reset_predictor():
     """Calls the /reset_predictor endpoint."""
-    url = f"{BASE_URL}/reset_predictor"
+    url = f"{BASE_URL}/image/reset_predictor"
     response = requests.post(url)
     if response.status_code == 200:
         print("Predictor reset successfully.")
@@ -112,7 +112,7 @@ def reset_predictor():
 
 def get_masks_batch(data, test_name):
     """Calls the /get_masks_batch endpoint and saves the returned masks."""
-    url = f"{BASE_URL}/get_masks_batch"
+    url = f"{BASE_URL}/image/get_masks_batch"
     response = requests.post(url, json=data)
 
     if response.status_code == 200:
