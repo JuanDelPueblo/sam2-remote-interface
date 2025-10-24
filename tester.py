@@ -9,11 +9,13 @@ import json
 
 import requests
 from PIL import Image
+import numpy as np
 
 # Configuration
 BASE_URL = "http://127.0.0.1:8000"
 IMAGE_1_PATH = "images/truck.jpg"
 IMAGE_2_PATH = "images/groceries.jpg"
+VIDEO_DIR = "video"
 OUTPUT_DIR = Path("images")
 API_FILE = "api.py"
 
@@ -83,6 +85,74 @@ def reset_predictor():
         print(f"Failed to reset predictor. Status: {response.status_code}, Response: {response.text}")
 
 
+def init_video_state(video_dir):
+    """Calls the /video/init_state endpoint."""
+    url = f"{BASE_URL}/video/init_state"
+    response = requests.post(url, params={"video_frames_dir": video_dir})
+    if response.status_code == 200:
+        print(f"Video state initialized successfully for '{video_dir}'.")
+    else:
+        print(f"Failed to initialize video state. Status: {response.status_code}, Response: {response.text}")
+    return response.status_code == 200
+
+
+def reset_video_state():
+    """Calls the /video/reset_state endpoint."""
+    url = f"{BASE_URL}/video/reset_state"
+    response = requests.post(url)
+    if response.status_code == 200:
+        print("Video state reset successfully.")
+    else:
+        print(f"Failed to reset video state. Status: {response.status_code}, Response: {response.text}")
+
+
+def add_new_points_or_box(frame_idx, obj_id, points=None, labels=None, clear_old_points=True, box=None):
+    """Calls the /video/add_new_points_or_box endpoint."""
+    url = f"{BASE_URL}/video/add_new_points_or_box"
+    payload = {
+        "frame_idx": frame_idx,
+        "obj_id": obj_id,
+        "clear_old_points": clear_old_points
+    }
+    if points is not None:
+        payload["points"] = points.tolist() if isinstance(points, np.ndarray) else points
+    if labels is not None:
+        payload["labels"] = labels.tolist() if isinstance(labels, np.ndarray) else labels
+    if box is not None:
+        payload["box"] = box.tolist() if isinstance(box, np.ndarray) else box
+    
+    response = requests.post(url, json=payload)
+    if response.status_code == 200:
+        response_data = response.json()
+        print(f"Added points/box for frame {frame_idx}, object {obj_id}.")
+        print(f"  Object IDs: {response_data.get('out_obj_ids', [])}")
+    else:
+        print(f"Failed to add points/box. Status: {response.status_code}, Response: {response.text}")
+    return response.status_code == 200, response.json() if response.status_code == 200 else None
+
+
+def propagate_in_video(start_frame_idx=None, max_frame_num_to_track=None, reverse=False):
+    """Calls the /video/propagate_in_video endpoint."""
+    url = f"{BASE_URL}/video/propagate_in_video"
+    payload = {
+        "start_frame_idx": start_frame_idx,
+        "max_frame_num_to_track": max_frame_num_to_track,
+        "reverse": reverse
+    }
+    response = requests.post(url, json=payload)
+    if response.status_code == 200:
+        response_data = response.json()
+        num_frames = len(response_data.get("video_segments", {}))
+        saved_paths = response_data.get("saved_mask_paths", {})
+        print(f"Propagation successful! Processed {num_frames} frames.")
+        print(f"Saved masks for {len(saved_paths)} frames.")
+        for frame_idx, paths in saved_paths.items():
+            print(f"  Frame {frame_idx}: {paths}")
+    else:
+        print(f"Failed to propagate. Status: {response.status_code}, Response: {response.text}")
+    return response.status_code == 200, response.json() if response.status_code == 200 else None
+
+
 def get_masks_batch(data, test_name):
     """Calls the /get_masks_batch endpoint and prints the returned mask paths."""
     url = f"{BASE_URL}/image/get_masks_batch"
@@ -118,6 +188,10 @@ def run_tests():
             "payload": {"point_coords": [[575, 750]], "point_labels": [1], "input_boxes": [[425, 600, 700, 875]], "multimask_output": False}
         }
     ]
+
+    print("=" * 60)
+    print("RUNNING IMAGE MASKING TESTS")
+    print("=" * 60)
 
     for test in test_cases:
         print(f"\n--- Running test: {test['name']} ---")
@@ -159,6 +233,78 @@ def run_tests():
     time.sleep(1)
 
 
+def run_video_tests():
+    """Runs the video masking test suite."""
+    print("\n" + "=" * 60)
+    print("RUNNING VIDEO MASKING TESTS")
+    print("=" * 60)
+    
+    # Check if video directory exists
+    if not os.path.exists(VIDEO_DIR):
+        print(f"\nVideo directory '{VIDEO_DIR}' not found. Skipping video tests.")
+        return
+    
+    print(f"\n--- Running test: video_masking ---")
+    
+    # Initialize video state
+    if not init_video_state(VIDEO_DIR):
+        print("Failed to initialize video state. Skipping video tests.")
+        return
+    
+    # Test case from user request
+    ann_frame_idx = 0  # the frame index we interact with
+    ann_obj_id = 1  # give a unique id to each object we interact with (it can be any integers)
+    
+    # Let's add a positive click at (x, y) = (210, 350) to get started
+    print(f"\nAdding first point at (210, 350) on frame {ann_frame_idx}...")
+    points = np.array([[210, 350]], dtype=np.float32)
+    # for labels, `1` means positive click and `0` means negative click
+    labels = np.array([1], np.int32)
+    success, _ = add_new_points_or_box(
+        frame_idx=ann_frame_idx,
+        obj_id=ann_obj_id,
+        points=points,
+        labels=labels
+    )
+    
+    if not success:
+        print("Failed to add first point. Aborting video test.")
+        return
+    
+    time.sleep(0.5)
+    
+    # Let's add a 2nd positive click at (x, y) = (250, 220) to refine the mask
+    # sending all clicks (and their labels) to `add_new_points_or_box`
+    print(f"\nAdding second point at (250, 220) on frame {ann_frame_idx}...")
+    points = np.array([[210, 350], [250, 220]], dtype=np.float32)
+    # for labels, `1` means positive click and `0` means negative click
+    labels = np.array([1, 1], np.int32)
+    success, _ = add_new_points_or_box(
+        frame_idx=ann_frame_idx,
+        obj_id=ann_obj_id,
+        points=points,
+        labels=labels
+    )
+    
+    if not success:
+        print("Failed to add second point. Aborting video test.")
+        return
+    
+    time.sleep(0.5)
+    
+    # Propagate through the video
+    print(f"\nPropagating masks through video...")
+    success, result = propagate_in_video()
+    
+    if success:
+        print("\n✓ Video masking test completed successfully!")
+    else:
+        print("\n✗ Video masking test failed.")
+    
+    # Reset video state for cleanup
+    reset_video_state()
+
+
 if __name__ == "__main__":
     # Start the FastAPI server as a background process
     server_process = subprocess.Popen(["fastapi", "dev", API_FILE])
@@ -168,8 +314,15 @@ if __name__ == "__main__":
         # Wait for the server to be ready
         # The root endpoint in api.py returns a simple message
         if wait_for_server(f"{BASE_URL}/", timeout=30):
-            # Run the tests
+            # Run the image tests
             run_tests()
+            
+            # Run the video tests
+            run_video_tests()
+            
+            print("\n" + "=" * 60)
+            print("ALL TESTS COMPLETED")
+            print("=" * 60)
         else:
             print("Could not connect to the server. Aborting tests.")
 

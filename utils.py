@@ -1,5 +1,7 @@
 import numpy as np
 import cv2
+from pathlib import Path
+import shutil
 
 
 def show_mask(image, mask, random_color=False, borders=True):
@@ -102,3 +104,56 @@ def show_masks(image, masks, scores, point_coords=None, box_coords=None, input_l
         output_images.append(buffer.tobytes())
 
     return output_images
+
+
+def save_video_masks(video_dir, video_segments):
+    """
+    Save video frame masks to disk.
+    
+    Parameters:
+    - video_dir: str, path to the directory containing video frames
+    - video_segments: dict, mapping from frame_idx to {obj_id: mask}
+    
+    Returns: dict mapping frame_idx to list of saved mask paths
+    """
+    video_path = Path(video_dir)
+    masks_dir = video_path / "masks"
+    
+    # Remove and recreate the masks directory to overwrite on each iteration
+    if masks_dir.exists():
+        shutil.rmtree(masks_dir)
+    masks_dir.mkdir(exist_ok=True)
+    
+    saved_paths = {}
+    
+    # Get list of frame files in order
+    frame_files = sorted([f for f in video_path.iterdir() if f.suffix.lower() in ['.jpg', '.jpeg', '.png']])
+    
+    for frame_idx, obj_masks in video_segments.items():
+        if frame_idx >= len(frame_files):
+            continue
+            
+        # Load the original frame
+        frame_path = frame_files[frame_idx]
+        frame = cv2.imread(str(frame_path))
+        
+        if frame is None:
+            continue
+        
+        # Create a copy for visualization
+        output_frame = frame.copy()
+        
+        # Apply all object masks to this frame
+        for obj_id, mask in obj_masks.items():
+            output_frame = show_mask(output_frame, mask, random_color=True, borders=True)
+        
+        # Save the frame with masks
+        output_filename = f"frame_{frame_idx:05d}_masks.png"
+        output_path = masks_dir / output_filename
+        cv2.imwrite(str(output_path), output_frame)
+        
+        if frame_idx not in saved_paths:
+            saved_paths[frame_idx] = []
+        saved_paths[frame_idx].append(str(output_path))
+    
+    return saved_paths

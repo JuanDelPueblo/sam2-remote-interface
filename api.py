@@ -1,5 +1,5 @@
-from typing import Optional, Union
-from fastapi import FastAPI, File, UploadFile
+from typing import Optional
+from fastapi import FastAPI
 from pydantic import BaseModel
 import numpy as np
 from PIL import Image
@@ -7,7 +7,6 @@ from masker_manager import MaskerManager, MaskerType
 import sam2_image_masker as sim
 import sam2_video_masker as svm
 from utils import *
-import base64
 import os
 from pathlib import Path
 from datetime import datetime
@@ -20,6 +19,7 @@ image = None
 images = None
 image_path: Optional[str] = None
 image_paths: Optional[list[str]] = None
+video_dir: Optional[str] = None
 
 
 class ImagePredictorRequest(BaseModel):
@@ -220,10 +220,12 @@ async def reset_predictor():
     return {"message": "Predictor reset successfully"}
 
 @app.post("/video/init_state")
-async def init_video_state(video_dir: str):
+async def init_video_state(video_frames_dir: str):
     masker_manager.set_masker_type(MaskerType.video)
     masker = masker_manager.get_masker()
     assert isinstance(masker, svm.SAM2VideoMasker)
+    global video_dir
+    video_dir = video_frames_dir
     masker.init_state(video_dir)
     return {"message": "Video state initialized successfully"}
 
@@ -250,7 +252,7 @@ async def add_new_points_or_box(request: VideoAddPointsOrBoxRequest):
     )
     masks_list = [(out_mask_logits[i] > 0.0).cpu().numpy().tolist() for i in range(len(out_obj_ids))]
     return {
-        "out_obj_ids": out_obj_ids.tolist(),
+        "out_obj_ids": out_obj_ids,
         "out_masks": masks_list
     }
 
@@ -259,11 +261,19 @@ async def propagate_in_video(request: VideoPropagateRequest):
     masker = masker_manager.get_masker()
     if not isinstance(masker, svm.SAM2VideoMasker):
         return {"error": "Video masker not active."}
+    global video_dir
+    if video_dir is None:
+        return {"error": "Video directory not set. Call /video/init_state first."}
+    
     video_segments = masker.propagate_in_video(
         start_frame_idx=request.start_frame_idx,
         max_frame_num_to_track=request.max_frame_num_to_track,
         reverse=request.reverse
     )
+    
+    # Save masks for each frame
+    saved_mask_paths = save_video_masks(video_dir, video_segments)
+    
     # Convert masks to lists for JSON serialization
     video_segments_serializable = {}
     for frame_idx, obj_dict in video_segments.items():
@@ -271,7 +281,8 @@ async def propagate_in_video(request: VideoPropagateRequest):
             obj_id: mask.tolist() for obj_id, mask in obj_dict.items()
         }
     return {
-        "video_segments": video_segments_serializable
+        "video_segments": video_segments_serializable,
+        "saved_mask_paths": saved_mask_paths
     }
 
 @app.post("/video/clear_all_prompts_in_frame")
