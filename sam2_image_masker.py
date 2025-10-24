@@ -9,7 +9,7 @@ os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
 
 class SAM2ImageMasker:
-    def __init__(self, checkpoint="./checkpoints/sam2.1_hiera_large.pt", model_cfg="configs/sam2.1/sam2.1_hiera_l.yaml"):
+    def __init__(self):
         if torch.cuda.is_available():
             self.device = torch.device("cuda")
         elif torch.backends.mps.is_available():
@@ -33,8 +33,7 @@ class SAM2ImageMasker:
 
         np.random.seed(3)
 
-        self.sam2_model = build_sam2(model_cfg, checkpoint, device=self.device)
-        self.predictor = SAM2ImagePredictor(self.sam2_model)
+        self.predictor = SAM2ImagePredictor.from_pretrained("facebook/sam2-hiera-large")
 
     def set_image(self, image):
         self.predictor.set_image(image)

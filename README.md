@@ -1,6 +1,6 @@
-# SAM 2 Universal Web API
+# SAM 2 Client Backend
 
-Simple web API for SAM 2. Currently only supports images but support for videos is coming soon.
+Simple backend API for SAM 2 to interact with C++ frontend. Supports both images and video masking.
 
 ## How to use
 
@@ -12,12 +12,4 @@ Simple web API for SAM 2. Currently only supports images but support for videos 
 
 4. Run `pip install -e ".[notebooks]"` while in `sam2` directory
 
-5. Return to this project's directory and run
-
-```bash
-cd checkpoints && \
-./download_ckpts.sh && \
-cd ..
-```
-
-6. Run `fastapi dev api.py` to test the API manually with hot reload, or run `python3 tester.py` to test the API automatically and see results under `images/`
+5. Run `fastapi dev api.py` to test the API manually with hot reload, or run `python3 tester.py` to test the API automatically and see results under `images/`
