@@ -8,12 +8,18 @@ import sam2_image_masker as sim
 import sam2_video_masker as svm
 from utils import *
 import base64
+import os
+from pathlib import Path
+from datetime import datetime
+from io import BytesIO
 
 app = FastAPI()
 
 masker_manager = MaskerManager()
 image = None
 images = None
+image_path: Optional[str] = None
+image_paths: Optional[list[str]] = None
 
 
 class ImagePredictorRequest(BaseModel):
@@ -21,7 +27,6 @@ class ImagePredictorRequest(BaseModel):
     point_labels: Optional[list[int]] = None
     input_boxes: Optional[list[list[float]]] = None
     multimask_output: bool = False
-    return_masked_images: bool = False
 
 class BatchItem(BaseModel):
     point_coords: Optional[list[list[list[float]]]] = None
@@ -47,6 +52,13 @@ class VideoPropagateRequest(BaseModel):
     reverse: bool = False
 
 
+class SetImageRequest(BaseModel):
+    path: str
+
+class SetImageBatchRequest(BaseModel):
+    paths: list[str]
+
+
 @app.get("/")
 async def root():
     return {"message": "SAM 2 Image Masker API"}
@@ -65,25 +77,27 @@ async def status():
 
 
 @app.post("/image/set_image")
-async def set_image(request: UploadFile = File(...)):
+async def set_image(request: SetImageRequest):
     masker_manager.set_masker_type(MaskerType.image)
     masker = masker_manager.get_masker()
     assert isinstance(masker, sim.SAM2ImageMasker)
-    global image
-    image = Image.open(request.file)
+    global image, image_path
+    image_path = request.path
+    image = Image.open(request.path)
     image = np.array(image.convert("RGB"))
     masker.set_image(image)
     return {"message": "Image set successfully"}
 
 @app.post("/image/set_image_batch")
-async def set_image_batch(requests: list[UploadFile] = File(...)):
+async def set_image_batch(request: SetImageBatchRequest):
     masker_manager.set_masker_type(MaskerType.image)
     masker = masker_manager.get_masker()
     assert isinstance(masker, sim.SAM2ImageMasker)
-    global images
+    global images, image_paths
+    image_paths = request.paths
     images = []
-    for request in requests:
-        img = Image.open(request.file)
+    for path in request.paths:
+        img = Image.open(path)
         images.append(np.array(img.convert("RGB")))
     masker.set_image_batch(images)
     return {"message": "Image batch set successfully"}
@@ -93,11 +107,12 @@ async def get_masks(points: ImagePredictorRequest):
     masker = masker_manager.get_masker()
     if not isinstance(masker, sim.SAM2ImageMasker):
         return {"error": "Image masker not active. Call /image/set_image first."}
+    if image_path is None:
+        return {"error": "Image path not set. Call /image/set_image first."}
     point_coords = None
     point_labels = None
     input_boxes = None
     multimask_output = points.multimask_output
-    return_masked_images = points.return_masked_images
 
     if points.point_coords is not None:
         point_coords = np.array(points.point_coords)
@@ -111,24 +126,27 @@ async def get_masks(points: ImagePredictorRequest):
 
     masks_list = [mask.tolist() for mask in masks]
 
-    if not return_masked_images:
-        return {
-            "masks": masks_list,
-            "scores": scores.tolist(),
-            "logits": logits.tolist()
-        }
-
     mask_images = show_masks(image=image, masks=masks, scores=scores,
                              point_coords=point_coords, box_coords=input_boxes, input_labels=point_labels, borders=True)
 
-    mask_images_base64 = [base64.b64encode(
-        img).decode('utf-8') for img in mask_images]
+    image_name = Path(image_path).stem
+    output_dir = Path(os.path.dirname(image_path)) / f"{image_name}_masks"
+    output_dir.mkdir(exist_ok=True)
+    
+    saved_mask_paths = []
+    for i, mask_img_bytes in enumerate(mask_images):
+        mask_image = Image.open(BytesIO(mask_img_bytes))
+        timestamp = int(datetime.now().timestamp())
+        filename = f"mask_{timestamp}_{i+1}.png"
+        output_path = output_dir / filename
+        mask_image.save(output_path)
+        saved_mask_paths.append(str(output_path))
 
     return {
         "masks": masks_list,
         "scores": scores.tolist(),
         "logits": logits.tolist(),
-        "mask_images_base64": mask_images_base64
+        "saved_mask_paths": saved_mask_paths
     }
 
 @app.post("/image/get_masks_batch")
@@ -138,9 +156,11 @@ async def get_masks_batch(
     masker = masker_manager.get_masker()
     if not isinstance(masker, sim.SAM2ImageMasker):
         return {"error": "Image masker not active. Call /image/set_image_batch first."}
-    global images
+    global images, image_paths
     if images is None:
         return {"error": "No images set. Call /set_image_batch first."}
+    if image_paths is None:
+        return {"error": "Image paths not set. Call /image/set_image_batch first."}
     request_data = data
     point_coords_batch = [np.array(item.point_coords) if item.point_coords else None for item in request_data.items]
     point_labels_batch = [np.array(item.point_labels) if item.point_labels else None for item in request_data.items]
@@ -158,7 +178,7 @@ async def get_masks_batch(
     scores_list = [[score.tolist() for score in scores] for scores in scores_batch]
     logits_list = [[logit.tolist() for logit in logits] for logits in logits_batch]
 
-    mask_images_base64_batch = []
+    saved_mask_paths_batch = []
     for i, masks in enumerate(masks_batch):
         mask_images = show_masks(
             image=images[i],
@@ -169,14 +189,26 @@ async def get_masks_batch(
             input_labels=point_labels_batch[i],
             borders=True
         )
-        mask_images_base64 = [base64.b64encode(img).decode('utf-8') for img in mask_images]
-        mask_images_base64_batch.append(mask_images_base64)
+        
+        image_name = Path(image_paths[i]).stem
+        output_dir = Path(os.path.dirname(image_paths[i])) / f"{image_name}_masks"
+        output_dir.mkdir(exist_ok=True)
+        
+        saved_mask_paths = []
+        for j, mask_img_bytes in enumerate(mask_images):
+            mask_image = Image.open(BytesIO(mask_img_bytes))
+            timestamp = int(datetime.now().timestamp())
+            filename = f"mask_batch_{i+1}_{timestamp}_{j+1}.png"
+            output_path = output_dir / filename
+            mask_image.save(output_path)
+            saved_mask_paths.append(str(output_path))
+        saved_mask_paths_batch.append(saved_mask_paths)
 
     return {
         "masks_batch": masks_list,
         "scores_batch": scores_list,
         "logits_batch": logits_list,
-        "mask_images_base64_batch": mask_images_base64_batch
+        "saved_mask_paths_batch": saved_mask_paths_batch
     }
 
 @app.post("/image/reset_predictor")

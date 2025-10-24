@@ -12,8 +12,8 @@ from PIL import Image
 
 # Configuration
 BASE_URL = "http://127.0.0.1:8000"
-IMAGE_1_PATH = "truck.jpg"
-IMAGE_2_PATH = "groceries.jpg"
+IMAGE_1_PATH = "images/truck.jpg"
+IMAGE_2_PATH = "images/groceries.jpg"
 OUTPUT_DIR = Path("images")
 API_FILE = "api.py"
 
@@ -39,9 +39,7 @@ def wait_for_server(url, timeout=30):
 def set_image(image_path):
     """Calls the /set_image endpoint."""
     url = f"{BASE_URL}/image/set_image"
-    with open(image_path, "rb") as f:
-        files = {"request": (os.path.basename(image_path), f, "image/jpeg")}
-        response = requests.post(url, files=files)
+    response = requests.post(url, json={"path": image_path})
     if response.status_code == 200:
         print(f"Image '{image_path}' set successfully.")
     else:
@@ -52,16 +50,7 @@ def set_image(image_path):
 def set_image_batch(image_paths):
     """Calls the /set_image_batch endpoint."""
     url = f"{BASE_URL}/image/set_image_batch"
-    files = []
-    for image_path in image_paths:
-        files.append(('requests', (os.path.basename(image_path), open(image_path, 'rb'), 'image/jpeg')))
-    
-    response = requests.post(url, files=files)
-    
-    # Close the files
-    for _, file_tuple in files:
-        file_tuple[1].close()
-
+    response = requests.post(url, json={"paths": image_paths})
     if response.status_code == 200:
         print(f"Image batch set successfully.")
     else:
@@ -70,32 +59,16 @@ def set_image_batch(image_paths):
 
 
 def get_masks(data, test_name):
-    """Calls the /get_masks endpoint and saves the returned masks."""
+    """Calls the /get_masks endpoint and prints the returned mask paths."""
     url = f"{BASE_URL}/image/get_masks"
     response = requests.post(url, json=data)
 
     if response.status_code == 200:
-        masks_data = response.json().get("mask_images_base64", [])
-        print(f"Test '{test_name}': Successfully retrieved {len(masks_data)} masks.")
-        for i, mask_b64 in enumerate(masks_data):
-            try:
-                # Decode the base64 string
-                mask_bytes = base64.b64decode(mask_b64)
-                
-                # Create an image from the bytes
-                mask_image = Image.open(BytesIO(mask_bytes))
-                
-                # Generate a unique filename
-                timestamp = int(datetime.now().timestamp())
-                filename = f"mask_{timestamp}_{test_name}_{i+1}.png"
-                output_path = OUTPUT_DIR / filename
-                
-                # Save the image
-                mask_image.save(output_path)
-                print(f"Saved mask to '{output_path}'")
-
-            except Exception as e:
-                print(f"Error processing mask for test '{test_name}': {e}")
+        response_data = response.json()
+        saved_paths = response_data.get("saved_mask_paths", [])
+        print(f"Test '{test_name}': Successfully retrieved {len(saved_paths)} masks.")
+        for path in saved_paths:
+            print(f"  Mask saved at: {path}")
     else:
         print(f"Test '{test_name}': Failed to get masks. Status: {response.status_code}, Response: {response.text}")
 
@@ -111,36 +84,19 @@ def reset_predictor():
 
 
 def get_masks_batch(data, test_name):
-    """Calls the /get_masks_batch endpoint and saves the returned masks."""
+    """Calls the /get_masks_batch endpoint and prints the returned mask paths."""
     url = f"{BASE_URL}/image/get_masks_batch"
     response = requests.post(url, json=data)
 
     if response.status_code == 200:
         response_data = response.json()
-        masks_batch_data = response_data.get("mask_images_base64_batch", [])
-        print(f"Test '{test_name}': Successfully retrieved {len(masks_batch_data)} batches of masks.")
+        saved_paths_batch = response_data.get("saved_mask_paths_batch", [])
+        print(f"Test '{test_name}': Successfully retrieved {len(saved_paths_batch)} batches of masks.")
         
-        for i, masks_data in enumerate(masks_batch_data):
-            print(f"  Processing batch {i+1} with {len(masks_data)} masks.")
-            for j, mask_b64 in enumerate(masks_data):
-                try:
-                    # Decode the base64 string
-                    mask_bytes = base64.b64decode(mask_b64)
-                    
-                    # Create an image from the bytes
-                    mask_image = Image.open(BytesIO(mask_bytes))
-                    
-                    # Generate a unique filename
-                    timestamp = int(datetime.now().timestamp())
-                    filename = f"mask_{timestamp}_{test_name}_batch{i+1}_{j+1}.png"
-                    output_path = OUTPUT_DIR / filename
-                    
-                    # Save the image
-                    mask_image.save(output_path)
-                    print(f"    Saved mask to '{output_path}'")
-
-                except Exception as e:
-                    print(f"    Error processing mask for test '{test_name}', batch {i+1}: {e}")
+        for i, saved_paths in enumerate(saved_paths_batch):
+            print(f"  Processing batch {i+1} with {len(saved_paths)} masks.")
+            for path in saved_paths:
+                print(f"    Mask saved at: {path}")
     else:
         print(f"Test '{test_name}': Failed to get batch masks. Status: {response.status_code}, Response: {response.text}")
 
@@ -151,15 +107,15 @@ def run_tests():
     test_cases = [
         {
             "name": "single_point",
-            "payload": {"point_coords": [[500, 375]], "point_labels": [1], "multimask_output": False, "return_masked_images": True}
+            "payload": {"point_coords": [[500, 375]], "point_labels": [1], "multimask_output": False}
         },
         {
             "name": "single_box",
-            "payload": {"input_boxes": [[425, 600, 700, 875]], "multimask_output": False, "return_masked_images": True}
+            "payload": {"input_boxes": [[425, 600, 700, 875]], "multimask_output": False}
         },
         {
             "name": "point_and_box",
-            "payload": {"point_coords": [[575, 750]], "point_labels": [1], "input_boxes": [[425, 600, 700, 875]], "multimask_output": False, "return_masked_images": True}
+            "payload": {"point_coords": [[575, 750]], "point_labels": [1], "input_boxes": [[425, 600, 700, 875]], "multimask_output": False}
         }
     ]
 
