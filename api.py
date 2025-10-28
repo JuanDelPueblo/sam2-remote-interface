@@ -6,11 +6,13 @@ from PIL import Image
 from model_manager import ModelManager, ModelType
 import sam2_image_masker as sim
 import sam2_video_masker as svm
+import co_tracker as cot
 from utils import *
 import os
 from pathlib import Path
 from datetime import datetime
 from io import BytesIO
+import mediapy
 
 app = FastAPI()
 
@@ -20,6 +22,8 @@ images = None
 image_path: Optional[str] = None
 image_paths: Optional[list[str]] = None
 video_dir: Optional[str] = None
+tracking_video: Optional[np.ndarray] = None
+tracking_video_path: Optional[str] = None
 
 
 class ImagePredictorRequest(BaseModel):
@@ -57,6 +61,20 @@ class SetImageRequest(BaseModel):
 
 class SetImageBatchRequest(BaseModel):
     paths: list[str]
+
+
+class TrackingLoadVideoRequest(BaseModel):
+    video_path: str
+
+
+class TrackingGridRequest(BaseModel):
+    grid_size: int = 15
+    add_support_grid: bool = True
+
+
+class TrackingPointsRequest(BaseModel):
+    queries: list[list[float]]  # List of [t, x, y] coordinates
+    add_support_grid: bool = True
 
 
 @app.get("/")
@@ -300,3 +318,123 @@ async def remove_object(obj_id: int):
         return {"error": "Video masker not active."}
     masker.remove_object(obj_id)
     return {"message": "Object removed successfully"}
+
+
+@app.post("/tracking/load_video")
+async def load_tracking_video(request: TrackingLoadVideoRequest):
+    """Load a video file for tracking."""
+    model_manager.set_model_type(ModelType.tracking)
+    tracker = model_manager.get_model()
+    assert isinstance(tracker, cot.CoTracker)
+    
+    global tracking_video, tracking_video_path
+    tracking_video_path = request.video_path
+    
+    # Load video using mediapy
+    tracking_video = mediapy.read_video(request.video_path)
+    
+    return {
+        "message": "Video loaded successfully",
+        "shape": tracking_video.shape,
+        "num_frames": tracking_video.shape[0]
+    }
+
+
+@app.post("/tracking/track_grid")
+async def track_grid(request: TrackingGridRequest):
+    """Track a grid of points across the video."""
+    tracker = model_manager.get_model()
+    if not isinstance(tracker, cot.CoTracker):
+        return {"error": "Tracker not active. Call /tracking/load_video first."}
+    
+    global tracking_video, tracking_video_path
+    if tracking_video is None:
+        return {"error": "No video loaded. Call /tracking/load_video first."}
+    
+    # Run tracking
+    tracks, visibility = tracker.track(
+        tracking_video, 
+        queries=None, 
+        grid_size=request.grid_size,
+        add_support_grid=request.add_support_grid
+    )
+    
+    # Save visualization
+    painted_video = cot.paint_point_track(tracking_video, tracks, visibility)
+    
+    # Save output video
+    video_name = Path(tracking_video_path).stem
+    output_dir = Path(os.path.dirname(tracking_video_path))
+    timestamp = int(datetime.now().timestamp())
+    output_filename = f"{video_name}_tracked_grid_{timestamp}.mp4"
+    output_path = output_dir / output_filename
+    
+    fps = 30  # Default fps
+    try:
+        original_fps = mediapy.read_video(tracking_video_path).metadata.fps
+        if original_fps:
+            fps = original_fps
+    except:
+        pass
+    
+    mediapy.write_video(str(output_path), painted_video, fps=fps)
+    
+    return {
+        "message": "Grid tracking completed",
+        "tracks": tracks.tolist(),
+        "visibility": visibility.tolist(),
+        "num_points": tracks.shape[0],
+        "num_frames": tracks.shape[1],
+        "output_video_path": str(output_path)
+    }
+
+
+@app.post("/tracking/track_points")
+async def track_points(request: TrackingPointsRequest):
+    """Track specific query points across the video."""
+    tracker = model_manager.get_model()
+    if not isinstance(tracker, cot.CoTracker):
+        return {"error": "Tracker not active. Call /tracking/load_video first."}
+    
+    global tracking_video, tracking_video_path
+    if tracking_video is None:
+        return {"error": "No video loaded. Call /tracking/load_video first."}
+    
+    # Convert queries to numpy array
+    queries = np.array(request.queries)
+    
+    # Run tracking
+    tracks, visibility = tracker.track(
+        tracking_video,
+        queries=queries,
+        add_support_grid=request.add_support_grid
+    )
+    
+    # Save visualization
+    painted_video = cot.paint_point_track(tracking_video, tracks, visibility)
+    
+    # Save output video
+    video_name = Path(tracking_video_path).stem
+    output_dir = Path(os.path.dirname(tracking_video_path))
+    timestamp = int(datetime.now().timestamp())
+    output_filename = f"{video_name}_tracked_points_{timestamp}.mp4"
+    output_path = output_dir / output_filename
+    
+    fps = 30  # Default fps
+    try:
+        original_fps = mediapy.read_video(tracking_video_path).metadata.fps
+        if original_fps:
+            fps = original_fps
+    except:
+        pass
+    
+    mediapy.write_video(str(output_path), painted_video, fps=fps)
+    
+    return {
+        "message": "Point tracking completed",
+        "tracks": tracks.tolist(),
+        "visibility": visibility.tolist(),
+        "num_points": tracks.shape[0],
+        "num_frames": tracks.shape[1],
+        "output_video_path": str(output_path)
+    }

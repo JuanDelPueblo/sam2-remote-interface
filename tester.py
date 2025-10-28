@@ -16,6 +16,7 @@ BASE_URL = "http://127.0.0.1:8000"
 IMAGE_1_PATH = "images/truck.jpg"
 IMAGE_2_PATH = "images/groceries.jpg"
 VIDEO_DIR = "video"
+TRACKING_VIDEO_PATH = "apple.mp4"
 OUTPUT_DIR = Path("images")
 API_FILE = "api.py"
 
@@ -305,6 +306,126 @@ def run_video_tests():
     reset_video_state()
 
 
+def load_tracking_video(video_path):
+    """Calls the /tracking/load_video endpoint."""
+    url = f"{BASE_URL}/tracking/load_video"
+    response = requests.post(url, json={"video_path": video_path})
+    if response.status_code == 200:
+        response_data = response.json()
+        print(f"Video loaded successfully: {video_path}")
+        print(f"  Shape: {response_data.get('shape', [])}")
+        print(f"  Num frames: {response_data.get('num_frames', 0)}")
+    else:
+        print(f"Failed to load tracking video. Status: {response.status_code}, Response: {response.text}")
+    return response.status_code == 200, response.json() if response.status_code == 200 else None
+
+
+def track_grid(grid_size=15, add_support_grid=True):
+    """Calls the /tracking/track_grid endpoint."""
+    url = f"{BASE_URL}/tracking/track_grid"
+    payload = {
+        "grid_size": grid_size,
+        "add_support_grid": add_support_grid
+    }
+    response = requests.post(url, json=payload)
+    if response.status_code == 200:
+        response_data = response.json()
+        print(f"Grid tracking completed successfully!")
+        print(f"  Num points: {response_data.get('num_points', 0)}")
+        print(f"  Num frames: {response_data.get('num_frames', 0)}")
+        print(f"  Output video: {response_data.get('output_video_path', 'N/A')}")
+    else:
+        print(f"Failed to track grid. Status: {response.status_code}, Response: {response.text}")
+    return response.status_code == 200, response.json() if response.status_code == 200 else None
+
+
+def track_points(queries, add_support_grid=True):
+    """Calls the /tracking/track_points endpoint."""
+    url = f"{BASE_URL}/tracking/track_points"
+    payload = {
+        "queries": queries if isinstance(queries, list) else queries.tolist(),
+        "add_support_grid": add_support_grid
+    }
+    response = requests.post(url, json=payload)
+    if response.status_code == 200:
+        response_data = response.json()
+        print(f"Point tracking completed successfully!")
+        print(f"  Num points: {response_data.get('num_points', 0)}")
+        print(f"  Num frames: {response_data.get('num_frames', 0)}")
+        print(f"  Output video: {response_data.get('output_video_path', 'N/A')}")
+    else:
+        print(f"Failed to track points. Status: {response.status_code}, Response: {response.text}")
+    return response.status_code == 200, response.json() if response.status_code == 200 else None
+
+
+def run_tracking_tests():
+    """Runs the tracking test suite."""
+    print("\n" + "=" * 60)
+    print("RUNNING TRACKING TESTS")
+    print("=" * 60)
+    
+    # Check if tracking video exists
+    if not os.path.exists(TRACKING_VIDEO_PATH):
+        print(f"\nTracking video '{TRACKING_VIDEO_PATH}' not found. Skipping tracking tests.")
+        return
+    
+    # Test 1: Load video
+    print(f"\n--- Test 1: Load tracking video ---")
+    success, result = load_tracking_video(TRACKING_VIDEO_PATH)
+    
+    if not success:
+        print("Failed to load tracking video. Skipping remaining tracking tests.")
+        return
+    
+    time.sleep(1)
+    
+    # Test 2: Track grid
+    print(f"\n--- Test 2: Track grid of points ---")
+    success, result = track_grid(grid_size=10, add_support_grid=True)
+    
+    if success:
+        print("\n✓ Grid tracking test completed successfully!")
+    else:
+        print("\n✗ Grid tracking test failed.")
+    
+    time.sleep(1)
+    
+    # Test 3: Track specific points
+    print(f"\n--- Test 3: Track specific query points ---")
+    # Define some query points: [frame, x, y]
+    # Let's track a few points starting from frame 0
+    queries = [
+        [0, 400, 350],  # Center point
+        [10, 600, 500],  # Upper-left area
+        [20, 750, 600],  # Lower-right area
+        [30, 900, 200]
+    ]
+    success, result = track_points(queries, add_support_grid=False)
+    
+    if success:
+        print("\n✓ Point tracking test completed successfully!")
+    else:
+        print("\n✗ Point tracking test failed.")
+    
+    time.sleep(1)
+    
+    # Test 4: Track points with support grid
+    print(f"\n--- Test 4: Track points with support grid ---")
+    queries = [
+        [0, 320, 240],  # Single point with support grid
+    ]
+    success, result = track_points(queries, add_support_grid=True)
+    
+    if success:
+        print("\n✓ Point tracking with support grid completed successfully!")
+    else:
+        print("\n✗ Point tracking with support grid failed.")
+    
+    print("\n" + "=" * 60)
+    print("TRACKING TESTS COMPLETED")
+    print("=" * 60)
+
+
 if __name__ == "__main__":
     # Start the FastAPI server as a background process
     server_process = subprocess.Popen(["fastapi", "dev", API_FILE])
@@ -319,6 +440,9 @@ if __name__ == "__main__":
             
             # Run the video tests
             run_video_tests()
+            
+            # Run the tracking tests
+            run_tracking_tests()
             
             print("\n" + "=" * 60)
             print("ALL TESTS COMPLETED")

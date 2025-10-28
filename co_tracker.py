@@ -116,7 +116,9 @@ def paint_point_track(
   icon4 = np.pad(icon, [(1, 0), (1, 0), (0, 0)])
 
   video = frames.copy()
-  for t in range(num_frames):
+  # Use the minimum of video frames and track frames to avoid index errors
+  num_frames_to_paint = min(num_frames, frames.shape[0])
+  for t in range(num_frames_to_paint):
     # Pad so that points that extend outside the image frame don't crash us
     image = np.pad(
         video[t],
