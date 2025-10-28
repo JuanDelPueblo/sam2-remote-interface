@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import numpy as np
 from PIL import Image
-from masker_manager import MaskerManager, MaskerType
+from model_manager import ModelManager, ModelType
 import sam2_image_masker as sim
 import sam2_video_masker as svm
 from utils import *
@@ -14,7 +14,7 @@ from io import BytesIO
 
 app = FastAPI()
 
-masker_manager = MaskerManager()
+model_manager = ModelManager()
 image = None
 images = None
 image_path: Optional[str] = None
@@ -66,20 +66,20 @@ async def root():
 
 @app.get("/status")
 async def status():
-    active_masker_type = masker_manager.get_active_masker_type()
-    if not active_masker_type:
+    active_model_type = model_manager.get_active_model_type()
+    if not active_model_type:
         return {"status": "inactive", "device": None}
 
-    masker = masker_manager.get_masker()
-    if masker:
-        return {"status": f"{active_masker_type.value} active", "device": masker.device.type}
+    model = model_manager.get_model()
+    if model:
+        return {"status": f"{active_model_type.value} active", "device": model.device.type}
     return {"status": "inactive", "device": None}
 
 
 @app.post("/image/set_image")
 async def set_image(request: SetImageRequest):
-    masker_manager.set_masker_type(MaskerType.image)
-    masker = masker_manager.get_masker()
+    model_manager.set_model_type(ModelType.image)
+    masker = model_manager.get_model()
     assert isinstance(masker, sim.SAM2ImageMasker)
     global image, image_path
     image_path = request.path
@@ -90,8 +90,8 @@ async def set_image(request: SetImageRequest):
 
 @app.post("/image/set_image_batch")
 async def set_image_batch(request: SetImageBatchRequest):
-    masker_manager.set_masker_type(MaskerType.image)
-    masker = masker_manager.get_masker()
+    model_manager.set_model_type(ModelType.image)
+    masker = model_manager.get_model()
     assert isinstance(masker, sim.SAM2ImageMasker)
     global images, image_paths
     image_paths = request.paths
@@ -104,7 +104,7 @@ async def set_image_batch(request: SetImageBatchRequest):
 
 @app.post("/image/get_masks")
 async def get_masks(points: ImagePredictorRequest):
-    masker = masker_manager.get_masker()
+    masker = model_manager.get_model()
     if not isinstance(masker, sim.SAM2ImageMasker):
         return {"error": "Image masker not active. Call /image/set_image first."}
     if image_path is None:
@@ -153,7 +153,7 @@ async def get_masks(points: ImagePredictorRequest):
 async def get_masks_batch(
     data: ImageBatchPredictorRequest
 ):
-    masker = masker_manager.get_masker()
+    masker = model_manager.get_model()
     if not isinstance(masker, sim.SAM2ImageMasker):
         return {"error": "Image masker not active. Call /image/set_image_batch first."}
     global images, image_paths
@@ -213,7 +213,7 @@ async def get_masks_batch(
 
 @app.post("/image/reset_predictor")
 async def reset_predictor():
-    masker = masker_manager.get_masker()
+    masker = model_manager.get_model()
     if not isinstance(masker, sim.SAM2ImageMasker):
         return {"error": "Image masker not active."}
     masker.predictor.reset_predictor()
@@ -221,8 +221,8 @@ async def reset_predictor():
 
 @app.post("/video/init_state")
 async def init_video_state(video_frames_dir: str):
-    masker_manager.set_masker_type(MaskerType.video)
-    masker = masker_manager.get_masker()
+    model_manager.set_model_type(ModelType.video)
+    masker = model_manager.get_model()
     assert isinstance(masker, svm.SAM2VideoMasker)
     global video_dir
     video_dir = video_frames_dir
@@ -231,7 +231,7 @@ async def init_video_state(video_frames_dir: str):
 
 @app.post("/video/reset_state")
 async def reset_video_state():
-    masker = masker_manager.get_masker()
+    masker = model_manager.get_model()
     if not isinstance(masker, svm.SAM2VideoMasker):
         return {"error": "Video masker not active."}
     masker.reset_state()
@@ -239,7 +239,7 @@ async def reset_video_state():
 
 @app.post("/video/add_new_points_or_box")
 async def add_new_points_or_box(request: VideoAddPointsOrBoxRequest):
-    masker = masker_manager.get_masker()
+    masker = model_manager.get_model()
     if not isinstance(masker, svm.SAM2VideoMasker):
         return {"error": "Video masker not active."}
     out_obj_ids, out_mask_logits = masker.add_new_points_or_box(
@@ -258,7 +258,7 @@ async def add_new_points_or_box(request: VideoAddPointsOrBoxRequest):
 
 @app.post("/video/propagate_in_video")
 async def propagate_in_video(request: VideoPropagateRequest):
-    masker = masker_manager.get_masker()
+    masker = model_manager.get_model()
     if not isinstance(masker, svm.SAM2VideoMasker):
         return {"error": "Video masker not active."}
     global video_dir
@@ -287,7 +287,7 @@ async def propagate_in_video(request: VideoPropagateRequest):
 
 @app.post("/video/clear_all_prompts_in_frame")
 async def clear_all_prompts_in_frame(frame_idx: int, obj_id: int):
-    masker = masker_manager.get_masker()
+    masker = model_manager.get_model()
     if not isinstance(masker, svm.SAM2VideoMasker):
         return {"error": "Video masker not active."}
     masker.clear_all_prompts_in_frame(frame_idx, obj_id)
@@ -295,7 +295,7 @@ async def clear_all_prompts_in_frame(frame_idx: int, obj_id: int):
 
 @app.post("/video/remove_object")
 async def remove_object(obj_id: int):
-    masker = masker_manager.get_masker()
+    masker = model_manager.get_model()
     if not isinstance(masker, svm.SAM2VideoMasker):
         return {"error": "Video masker not active."}
     masker.remove_object(obj_id)
