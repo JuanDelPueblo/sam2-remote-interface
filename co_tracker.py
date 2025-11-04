@@ -211,28 +211,27 @@ class CoTracker:
             # tyx -> txy
             queries_torch = queries_torch[:, :, [0, 2, 1]]
 
-        # Run tracker
-        self.model(video_chunk=video_torch_resized, is_first_step=True, grid_size=0, queries=queries_torch, add_support_grid=add_support_grid)
+        # Run tracker using the model's internal forward method
+        # The torch.hub model is a wrapper (CoTrackerOnlinePredictor), access the actual model
+        actual_model = self.model.model if hasattr(self.model, 'model') else self.model
         
-        pred_tracks, pred_visibility = [], []
-        for ind in range(0, video_torch_resized.shape[1] - self.model.step, self.model.step):
-            tracks, visibility = self.model(
-                video_chunk=video_torch_resized[:, ind : ind + self.model.step * 2],
-                grid_size=0, 
-                queries=queries_torch, 
-                add_support_grid=add_support_grid
-            )
-            pred_tracks.append(tracks)
-            pred_visibility.append(visibility)
+        # For online models, we need to initialize the video processing first
+        actual_model.init_video_online_processing()
         
-        pred_tracks = torch.cat(pred_tracks, dim=1)
-        pred_visibility = torch.cat(pred_visibility, dim=1)
+        pred_tracks, pred_visibility = actual_model(
+            video=video_torch_resized,
+            queries=queries_torch,
+            iters=4,
+            is_train=False,
+            add_space_attn=add_support_grid,
+            is_online=False  # We process the whole video at once, not in online mode
+        )[:2]  # Get only tracks and visibility, ignore confidence and train_data
 
         # Scale tracks back to original video resolution
         H, W = video.shape[1:3]
         pred_tracks_scaled = pred_tracks * torch.tensor([W, H]).to(self.device) / torch.tensor([VIDEO_INPUT_RESO[1], VIDEO_INPUT_RESO[0]]).to(self.device)
         
-        return pred_tracks_scaled[0].permute(1, 0, 2).cpu().numpy(), pred_visibility[0].permute(1, 0).cpu().numpy()
+        return pred_tracks_scaled[0].permute(1, 0, 2).detach().cpu().numpy(), pred_visibility[0].permute(1, 0).detach().cpu().numpy()
 
 if __name__ == '__main__':
     import argparse
