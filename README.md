@@ -1,6 +1,6 @@
-# SAM 2 Client Backend
+# Data Engine
 
-Simple backend API for SAM 2 to interact with C++ frontend. Supports both images and video masking.
+Currently only the backend API for SAM 2 and cotracker is implemented to interact with C++ frontend. Supports both images and video masking.
 
 ## How to use
 
