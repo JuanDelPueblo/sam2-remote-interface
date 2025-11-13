@@ -18,9 +18,6 @@ class BackendInterface {
   ~BackendInterface();
 
   // Lifecycle management
-  bool initialize();
-  void shutdown();
-
   // Launch the FastAPI backend
   bool launchBackend(const std::string& python_executable = "python3",
                      const std::string& api_script_path = "./backend/api.py");

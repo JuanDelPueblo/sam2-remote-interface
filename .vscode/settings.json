@@ -71,6 +71,10 @@
 		"typeinfo": "cpp",
 		"variant": "cpp",
 		"format": "cpp",
-		"__nullptr": "cpp"
+		"__nullptr": "cpp",
+		"csignal": "cpp",
+		"any": "cpp",
+		"ranges": "cpp",
+		"valarray": "cpp"
 	}
 }

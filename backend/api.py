@@ -2,9 +2,9 @@ from typing import Optional
 from fastapi import FastAPI
 from pydantic import BaseModel
 import numpy as np
-import models.sam2_video_masker as svm
-import models.co_tracker as cot
-from utils import *
+import backend.co_tracker as cot
+import backend.sam2_video_masker as svm
+from backend.utils import *
 import os
 from pathlib import Path
 from datetime import datetime
