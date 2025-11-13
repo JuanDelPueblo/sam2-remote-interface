@@ -15,7 +15,7 @@ BASE_URL = "http://127.0.0.1:8000"
 BEDROOM_ZIP_URL = "https://dl.fbaipublicfiles.com/segment_anything_2/assets/bedroom.zip"
 BEDROOM_DIR = "bedroom"
 VIDEO_DIR = "bedroom"  # Will use bedroom frames for video tests
-TRACKING_VIDEO_PATH = "apple.mp4"
+TRACKING_VIDEO_PATH = "../../apple.mp4"
 API_FILE = "../api.py"
 
 
