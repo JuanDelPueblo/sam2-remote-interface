@@ -2,7 +2,6 @@ from typing import Optional
 from fastapi import FastAPI
 from pydantic import BaseModel
 import numpy as np
-from model_manager import ModelManager, ModelType
 import sam2_video_masker as svm
 import co_tracker as cot
 from utils import *
@@ -13,7 +12,11 @@ import mediapy
 
 app = FastAPI()
 
-model_manager = ModelManager()
+# Global model instances
+video_masker: Optional[svm.SAM2VideoMasker] = None
+tracker: Optional[cot.CoTracker] = None
+
+# Video state
 video_dir: Optional[str] = None
 tracking_video: Optional[np.ndarray] = None
 tracking_video_path: Optional[str] = None
@@ -60,40 +63,49 @@ async def root():
 
 @app.get("/status")
 async def status():
-    active_model_type = model_manager.get_active_model_type()
-    if not active_model_type:
+    global video_masker, tracker
+    
+    if video_masker is not None:
+        return {"status": "video active", "device": video_masker.device.type}
+    elif tracker is not None:
+        return {"status": "tracking active", "device": tracker.device}
+    else:
         return {"status": "inactive", "device": None}
-
-    model = model_manager.get_model()
-    if model:
-        return {"status": f"{active_model_type.value} active", "device": model.device.type}
-    return {"status": "inactive", "device": None}
 
 
 @app.post("/video/init_state")
 async def init_video_state(video_frames_dir: str):
-    model_manager.set_model_type(ModelType.video)
-    masker = model_manager.get_model()
-    assert isinstance(masker, svm.SAM2VideoMasker)
-    global video_dir
+    global video_masker, video_dir, tracker, tracking_video, tracking_video_path
+    
+    # Unload tracker if it's currently loaded
+    if tracker is not None:
+        del tracker
+        tracker = None
+        tracking_video = None
+        tracking_video_path = None
+    
+    # Initialize video masker if not already created
+    if video_masker is None:
+        video_masker = svm.SAM2VideoMasker()
+    
     video_dir = video_frames_dir
-    masker.init_state(video_dir)
+    video_masker.init_state(video_dir)
     return {"message": "Video state initialized successfully"}
 
 @app.post("/video/reset_state")
 async def reset_video_state():
-    masker = model_manager.get_model()
-    if not isinstance(masker, svm.SAM2VideoMasker):
+    global video_masker
+    if video_masker is None:
         return {"error": "Video masker not active."}
-    masker.reset_state()
+    video_masker.reset_state()
     return {"message": "Video state reset successfully"}
 
 @app.post("/video/add_new_points_or_box")
 async def add_new_points_or_box(request: VideoAddPointsOrBoxRequest):
-    masker = model_manager.get_model()
-    if not isinstance(masker, svm.SAM2VideoMasker):
+    global video_masker
+    if video_masker is None:
         return {"error": "Video masker not active."}
-    out_obj_ids, out_mask_logits = masker.add_new_points_or_box(
+    out_obj_ids, out_mask_logits = video_masker.add_new_points_or_box(
         frame_idx=request.frame_idx,
         obj_id=request.obj_id,
         points=request.points,
@@ -109,14 +121,14 @@ async def add_new_points_or_box(request: VideoAddPointsOrBoxRequest):
 
 @app.post("/video/add_new_mask")
 async def add_new_mask(request: VideoAddMaskRequest):
-    masker = model_manager.get_model()
-    if not isinstance(masker, svm.SAM2VideoMasker):
+    global video_masker
+    if video_masker is None:
         return {"error": "Video masker not active."}
     
     # Convert mask from list to numpy array
     mask = np.array(request.mask, dtype=bool)
     
-    frame_idx, out_obj_ids, out_mask_logits = masker.add_new_mask(
+    frame_idx, out_obj_ids, out_mask_logits = video_masker.add_new_mask(
         frame_idx=request.frame_idx,
         obj_id=request.obj_id,
         mask=mask
@@ -131,14 +143,13 @@ async def add_new_mask(request: VideoAddMaskRequest):
 
 @app.post("/video/propagate_in_video")
 async def propagate_in_video(request: VideoPropagateRequest):
-    masker = model_manager.get_model()
-    if not isinstance(masker, svm.SAM2VideoMasker):
+    global video_masker, video_dir
+    if video_masker is None:
         return {"error": "Video masker not active."}
-    global video_dir
     if video_dir is None:
         return {"error": "Video directory not set. Call /video/init_state first."}
     
-    video_segments = masker.propagate_in_video(
+    video_segments = video_masker.propagate_in_video(
         start_frame_idx=request.start_frame_idx,
         max_frame_num_to_track=request.max_frame_num_to_track,
         reverse=request.reverse
@@ -160,29 +171,36 @@ async def propagate_in_video(request: VideoPropagateRequest):
 
 @app.post("/video/clear_all_prompts_in_frame")
 async def clear_all_prompts_in_frame(frame_idx: int, obj_id: int):
-    masker = model_manager.get_model()
-    if not isinstance(masker, svm.SAM2VideoMasker):
+    global video_masker
+    if video_masker is None:
         return {"error": "Video masker not active."}
-    masker.clear_all_prompts_in_frame(frame_idx, obj_id)
+    video_masker.clear_all_prompts_in_frame(frame_idx, obj_id)
     return {"message": "Cleared all prompts in frame successfully"}
 
 @app.post("/video/remove_object")
 async def remove_object(obj_id: int):
-    masker = model_manager.get_model()
-    if not isinstance(masker, svm.SAM2VideoMasker):
+    global video_masker
+    if video_masker is None:
         return {"error": "Video masker not active."}
-    masker.remove_object(obj_id)
+    video_masker.remove_object(obj_id)
     return {"message": "Object removed successfully"}
 
 
 @app.post("/tracking/load_video")
 async def load_tracking_video(request: TrackingLoadVideoRequest):
     """Load a video file for tracking."""
-    model_manager.set_model_type(ModelType.tracking)
-    tracker = model_manager.get_model()
-    assert isinstance(tracker, cot.CoTracker)
+    global tracker, tracking_video, tracking_video_path, video_masker, video_dir
     
-    global tracking_video, tracking_video_path
+    # Unload video masker if it's currently loaded
+    if video_masker is not None:
+        del video_masker
+        video_masker = None
+        video_dir = None
+    
+    # Initialize tracker if not already created
+    if tracker is None:
+        tracker = cot.CoTracker()
+    
     tracking_video_path = request.video_path
     
     # Load video using mediapy
@@ -198,11 +216,11 @@ async def load_tracking_video(request: TrackingLoadVideoRequest):
 @app.post("/tracking/track_grid")
 async def track_grid(request: TrackingGridRequest):
     """Track a grid of points across the video."""
-    tracker = model_manager.get_model()
-    if not isinstance(tracker, cot.CoTracker):
+    global tracker, tracking_video, tracking_video_path
+    
+    if tracker is None:
         return {"error": "Tracker not active. Call /tracking/load_video first."}
     
-    global tracking_video, tracking_video_path
     if tracking_video is None:
         return {"error": "No video loaded. Call /tracking/load_video first."}
     
@@ -219,16 +237,16 @@ async def track_grid(request: TrackingGridRequest):
     
     # Save output video
     video_name = Path(tracking_video_path).stem
-    output_dir = Path(os.path.dirname(tracking_video_path))
+    output_dir = Path(tracking_video_path).parent
     timestamp = int(datetime.now().timestamp())
     output_filename = f"{video_name}_tracked_grid_{timestamp}.mp4"
     output_path = output_dir / output_filename
     
     fps = 30  # Default fps
     try:
-        original_fps = mediapy.read_video(tracking_video_path).metadata.fps
-        if original_fps:
-            fps = original_fps
+        video_metadata = mediapy.read_video(tracking_video_path)
+        if hasattr(video_metadata, 'metadata') and video_metadata.metadata and hasattr(video_metadata.metadata, 'fps'):
+            fps = video_metadata.metadata.fps
     except:
         pass
     
@@ -247,11 +265,11 @@ async def track_grid(request: TrackingGridRequest):
 @app.post("/tracking/track_points")
 async def track_points(request: TrackingPointsRequest):
     """Track specific query points across the video."""
-    tracker = model_manager.get_model()
-    if not isinstance(tracker, cot.CoTracker):
+    global tracker, tracking_video, tracking_video_path
+    
+    if tracker is None:
         return {"error": "Tracker not active. Call /tracking/load_video first."}
     
-    global tracking_video, tracking_video_path
     if tracking_video is None:
         return {"error": "No video loaded. Call /tracking/load_video first."}
     
@@ -270,16 +288,16 @@ async def track_points(request: TrackingPointsRequest):
     
     # Save output video
     video_name = Path(tracking_video_path).stem
-    output_dir = Path(os.path.dirname(tracking_video_path))
+    output_dir = Path(tracking_video_path).parent
     timestamp = int(datetime.now().timestamp())
     output_filename = f"{video_name}_tracked_points_{timestamp}.mp4"
     output_path = output_dir / output_filename
     
     fps = 30  # Default fps
     try:
-        original_fps = mediapy.read_video(tracking_video_path).metadata.fps
-        if original_fps:
-            fps = original_fps
+        video_metadata = mediapy.read_video(tracking_video_path)
+        if hasattr(video_metadata, 'metadata') and video_metadata.metadata and hasattr(video_metadata.metadata, 'fps'):
+            fps = video_metadata.metadata.fps
     except:
         pass
     
