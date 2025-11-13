@@ -58,7 +58,7 @@ class TrackingPointsRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"message": "SAM 2 Image Masker API"}
+    return {"message": "Data Engine Backend"}
 
 
 @app.get("/status")
