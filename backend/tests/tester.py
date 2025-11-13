@@ -5,15 +5,69 @@ import time
 from datetime import datetime
 from pathlib import Path
 import json
+import zipfile
 
 import requests
 import numpy as np
 
 # Configuration
 BASE_URL = "http://127.0.0.1:8000"
-VIDEO_DIR = "video"
+BEDROOM_ZIP_URL = "https://dl.fbaipublicfiles.com/segment_anything_2/assets/bedroom.zip"
+BEDROOM_DIR = "bedroom"
+VIDEO_DIR = "bedroom"  # Will use bedroom frames for video tests
 TRACKING_VIDEO_PATH = "apple.mp4"
 API_FILE = "../api.py"
+
+
+def download_and_extract_bedroom():
+    """Downloads and extracts the bedroom video frames if not already present."""
+    if os.path.exists(BEDROOM_DIR) and os.path.isdir(BEDROOM_DIR):
+        # Check if directory has files
+        if os.listdir(BEDROOM_DIR):
+            print(f"Bedroom directory already exists with files. Skipping download.")
+            return True
+    
+    print(f"Downloading bedroom.zip from {BEDROOM_ZIP_URL}...")
+    zip_path = "bedroom.zip"
+    
+    try:
+        # Download the file with progress indication
+        response = requests.get(BEDROOM_ZIP_URL, stream=True)
+        response.raise_for_status()
+        
+        total_size = int(response.headers.get('content-length', 0))
+        downloaded_size = 0
+        
+        with open(zip_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    downloaded_size += len(chunk)
+                    if total_size > 0:
+                        progress = (downloaded_size / total_size) * 100
+                        print(f"\rDownload progress: {progress:.1f}%", end='', flush=True)
+        
+        print("\nDownload complete!")
+        
+        # Extract the zip file
+        print(f"Extracting {zip_path}...")
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall('.')
+        
+        print(f"Extraction complete!")
+        
+        # Clean up the zip file
+        os.remove(zip_path)
+        print(f"Cleaned up {zip_path}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"\nError downloading or extracting bedroom.zip: {e}")
+        # Clean up partial downloads
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+        return False
 
 
 def wait_for_server(url, timeout=30):
@@ -292,9 +346,17 @@ def run_tracking_tests():
 
 
 if __name__ == "__main__":
+    # Download and extract bedroom video frames
+    print("=" * 60)
+    print("SETTING UP TEST DATA")
+    print("=" * 60)
+    if not download_and_extract_bedroom():
+        print("Failed to download bedroom data. Exiting.")
+        exit(1)
+    
     # Start the FastAPI server as a background process
     server_process = subprocess.Popen(["fastapi", "dev", API_FILE])
-    print(f"Starting FastAPI server with PID: {server_process.pid}...")
+    print(f"\nStarting FastAPI server with PID: {server_process.pid}...")
 
     try:
         # Wait for the server to be ready
