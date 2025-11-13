@@ -54,6 +54,17 @@ class SAM2VideoMasker:
 
         return out_obj_ids, out_mask_logits
 
+    def add_new_mask(self, frame_idx, obj_id, mask):
+        """Add new mask to a frame."""
+        frame_idx, out_obj_ids, out_mask_logits = self.predictor.add_new_mask(
+            inference_state=self.inference_state,
+            frame_idx=frame_idx,
+            obj_id=obj_id,
+            mask=mask,
+        )
+
+        return frame_idx, out_obj_ids, out_mask_logits
+
     def propagate_in_video(self, start_frame_idx=None, max_frame_num_to_track=None, reverse=False):
         video_segments = {}
         for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(self.inference_state, start_frame_idx, max_frame_num_to_track, reverse):

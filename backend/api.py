@@ -33,6 +33,12 @@ class VideoPropagateRequest(BaseModel):
     reverse: bool = False
 
 
+class VideoAddMaskRequest(BaseModel):
+    frame_idx: int
+    obj_id: int
+    mask: list[list[bool]]  # 2D boolean mask
+
+
 class TrackingLoadVideoRequest(BaseModel):
     video_path: str
 
@@ -97,6 +103,28 @@ async def add_new_points_or_box(request: VideoAddPointsOrBoxRequest):
     )
     masks_list = [(out_mask_logits[i] > 0.0).cpu().numpy().tolist() for i in range(len(out_obj_ids))]
     return {
+        "out_obj_ids": out_obj_ids,
+        "out_masks": masks_list
+    }
+
+@app.post("/video/add_new_mask")
+async def add_new_mask(request: VideoAddMaskRequest):
+    masker = model_manager.get_model()
+    if not isinstance(masker, svm.SAM2VideoMasker):
+        return {"error": "Video masker not active."}
+    
+    # Convert mask from list to numpy array
+    mask = np.array(request.mask, dtype=bool)
+    
+    frame_idx, out_obj_ids, out_mask_logits = masker.add_new_mask(
+        frame_idx=request.frame_idx,
+        obj_id=request.obj_id,
+        mask=mask
+    )
+    
+    masks_list = [(out_mask_logits[i] > 0.0).cpu().numpy().tolist() for i in range(len(out_obj_ids))]
+    return {
+        "frame_idx": frame_idx,
         "out_obj_ids": out_obj_ids,
         "out_masks": masks_list
     }
