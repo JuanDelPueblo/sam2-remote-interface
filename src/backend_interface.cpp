@@ -2,9 +2,11 @@
 
 #include <curl/curl.h>
 
+#include <chrono>
 #include <csignal>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
+#include <thread>
 
 // Constructor
 BackendInterface::BackendInterface(const std::string& base_url)
@@ -24,22 +26,65 @@ bool BackendInterface::launchBackend(const std::string& python_executable,
   // Build command to launch FastAPI with uvicorn
   std::string command =
       python_executable +
-      " -m uvicorn backend.api:app --host 0.0.0.0 --port 8000";
+      " -m uvicorn backend.api:app --host 0.0.0.0 --port 8000 --no-access-log";
 
-  // Start the backend as a background process; store PID if possible
-  // NOTE: Using system() here is simple but doesn't expose PID portably.
-  int ret = std::system((command + " &").c_str());
-  if (ret != 0) {
-    std::cerr << "Failed to start backend process (code " << ret << ")"
-              << std::endl;
+  // On POSIX systems, use a subshell to capture the PID of the uvicorn
+  // process. This keeps things simple while still allowing us to send a
+  // SIGTERM in stopBackend.
+  std::string full_command = command + " & echo $!";
+
+  FILE* pipe = popen(full_command.c_str(), "r");
+  if (!pipe) {
+    std::cerr << "Failed to start backend process" << std::endl;
     backend_running_ = false;
     backend_pid_ = -1;
     return false;
   }
 
-  backend_running_ = true;
-  backend_pid_ = -1;  // Not tracked portably here
-  return true;
+  char buffer[64];
+  std::string pid_str;
+  if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+    pid_str = buffer;
+  }
+  int status = pclose(pipe);
+  if (!pid_str.empty()) {
+    try {
+      backend_pid_ = std::stoi(pid_str);
+    } catch (...) {
+      backend_pid_ = -1;
+    }
+  } else {
+    backend_pid_ = -1;
+  }
+
+  if (status == -1) {
+    std::cerr << "Failed to obtain backend process status" << std::endl;
+  }
+
+  if (backend_pid_ <= 0) {
+    std::cerr << "Failed to determine backend PID" << std::endl;
+  }
+
+  // Poll the /health endpoint until the backend reports ready or timeout.
+  const int max_retries = 50;  // up to ~10 seconds
+  const auto delay = std::chrono::milliseconds(200);
+  bool ready = false;
+
+  for (int i = 0; i < max_retries; ++i) {
+    std::string resp = httpGet("/health", false);
+    if (!resp.empty()) {
+      ready = true;
+      break;
+    }
+    std::this_thread::sleep_for(delay);
+  }
+
+  backend_running_ = ready;
+  if (!backend_running_) {
+    std::cerr << "Backend did not become healthy within timeout" << std::endl;
+  }
+
+  return backend_running_;
 }
 
 bool BackendInterface::stopBackend() {
@@ -47,10 +92,8 @@ bool BackendInterface::stopBackend() {
     return true;
   }
 
-  // If we had a real PID, we could send SIGTERM. For now, rely on external
-  // lifecycle management and just mark it as stopped.
   if (backend_pid_ > 0) {
-    // Use POSIX kill if a PID is ever stored; ignore errors for now.
+    // Send SIGTERM to allow graceful shutdown; ignore errors for now.
     ::kill(backend_pid_, SIGTERM);
   }
 
@@ -283,7 +326,8 @@ BackendInterface::TrackingPointsResponse BackendInterface::trackingTrackPoints(
 }
 
 // HTTP helper methods
-std::string BackendInterface::httpGet(const std::string& endpoint) {
+std::string BackendInterface::httpGet(const std::string& endpoint,
+                                      bool logFailures) {
   CURL* curl = curl_easy_init();
   if (!curl) {
     std::cerr << "Failed to initialize CURL for GET" << std::endl;
@@ -305,7 +349,9 @@ std::string BackendInterface::httpGet(const std::string& endpoint) {
 
   CURLcode res = curl_easy_perform(curl);
   if (res != CURLE_OK) {
-    std::cerr << "CURL GET failed: " << curl_easy_strerror(res) << std::endl;
+    if (logFailures) {
+      std::cerr << "CURL GET failed: " << curl_easy_strerror(res) << std::endl;
+    }
     readBuffer.clear();
   }
 

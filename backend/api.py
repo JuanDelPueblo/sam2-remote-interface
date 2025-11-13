@@ -61,6 +61,12 @@ async def root():
     return {"message": "Data Engine Backend"}
 
 
+@app.get("/health")
+async def health():
+    """Simple health endpoint used by the C++ client to detect readiness."""
+    return {"status": "ok"}
+
+
 @app.get("/status")
 async def status():
     global video_masker, tracker

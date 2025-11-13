@@ -137,7 +137,7 @@ class BackendInterface {
   bool backend_running_;
 
   // HTTP helper methods
-  std::string httpGet(const std::string& endpoint);
+  std::string httpGet(const std::string& endpoint, bool logFailures = true);
   std::string httpPost(const std::string& endpoint,
                        const std::string& json_body);
 
