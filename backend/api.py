@@ -2,8 +2,8 @@ from typing import Optional
 from fastapi import FastAPI
 from pydantic import BaseModel
 import numpy as np
-import sam2_video_masker as svm
-import co_tracker as cot
+import models.sam2_video_masker as svm
+import models.co_tracker as cot
 from utils import *
 import os
 from pathlib import Path

@@ -13,7 +13,7 @@ import numpy as np
 BASE_URL = "http://127.0.0.1:8000"
 VIDEO_DIR = "video"
 TRACKING_VIDEO_PATH = "apple.mp4"
-API_FILE = "api.py"
+API_FILE = "../api.py"
 
 
 def wait_for_server(url, timeout=30):
