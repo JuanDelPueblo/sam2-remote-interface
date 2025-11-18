@@ -2,10 +2,9 @@ from typing import Optional
 from fastapi import FastAPI
 from pydantic import BaseModel
 import numpy as np
-import backend.co_tracker as cot
-import backend.sam2_video_masker as svm
-from backend.utils import *
-import os
+import co_tracker as cot
+import sam2_video_masker as svm
+from utils import *
 from pathlib import Path
 from datetime import datetime
 import mediapy
@@ -21,6 +20,9 @@ video_dir: Optional[str] = None
 tracking_video: Optional[np.ndarray] = None
 tracking_video_path: Optional[str] = None
 
+
+class VideoInitStateRequest(BaseModel):
+    video_frames_dir: str
 
 class VideoAddPointsOrBoxRequest(BaseModel):
     frame_idx: int
@@ -80,7 +82,7 @@ async def status():
 
 
 @app.post("/video/init_state")
-async def init_video_state(video_frames_dir: str):
+async def init_video_state(request: VideoInitStateRequest):
     global video_masker, video_dir, tracker, tracking_video, tracking_video_path
     
     # Unload tracker if it's currently loaded
@@ -94,7 +96,7 @@ async def init_video_state(video_frames_dir: str):
     if video_masker is None:
         video_masker = svm.SAM2VideoMasker()
     
-    video_dir = video_frames_dir
+    video_dir = request.video_frames_dir
     video_masker.init_state(video_dir)
     return {"message": "Video state initialized successfully"}
 

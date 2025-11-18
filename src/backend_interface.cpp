@@ -5,8 +5,22 @@
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <iostream>
 #include <nlohmann/json.hpp>
 #include <thread>
+
+namespace {
+// Truncate large bodies to keep logs readable while remaining informative.
+inline std::string truncateForLog(const std::string& s,
+                                  std::size_t max = 8192) {
+  if (s.size() <= max) return s;
+  std::string out = s.substr(0, max);
+  out += "... [truncated ";
+  out += std::to_string(s.size() - max);
+  out += " bytes]";
+  return out;
+}
+}  // namespace
 
 // Constructor
 BackendInterface::BackendInterface(const std::string& base_url)
@@ -23,15 +37,43 @@ bool BackendInterface::launchBackend(const std::string& python_executable,
     return true;
   }
 
-  // Build command to launch FastAPI with uvicorn
-  std::string command =
-      python_executable +
-      " -m uvicorn backend.api:app --host 0.0.0.0 --port 8000 --no-access-log";
+  // Build command to launch FastAPI with uvicorn from within api_script_path's
+  // folder Do it literally like: cd <dir> && python <module>
+  std::string dir;
+  std::string script;
+  {
+    // naive split: everything before last '/' is dir, after is filename
+    auto pos = api_script_path.find_last_of('/');
+    if (pos == std::string::npos) {
+      dir = ".";
+      script = api_script_path;
+    } else {
+      dir = api_script_path.substr(0, pos);
+      script = api_script_path.substr(pos + 1);
+    }
+  }
+
+  // derive module name from filename (strip trailing .py if present)
+  std::string module = script;
+  const std::string py_ext = ".py";
+  if (module.size() >= py_ext.size() &&
+      module.compare(module.size() - py_ext.size(), py_ext.size(), py_ext) ==
+          0) {
+    module = module.substr(0, module.size() - py_ext.size());
+  }
+
+  // cd into dir and run uvicorn using module:app
+  std::string command = "cd \"" + dir + "\" && " + python_executable +
+                        " -m uvicorn " + module +
+                        ":app --host 0.0.0.0 --port 8000 --no-access-log";
 
   // On POSIX systems, use a subshell to capture the PID of the uvicorn
   // process. This keeps things simple while still allowing us to send a
   // SIGTERM in stopBackend.
-  std::string full_command = command + " & echo $!";
+  // Redirect backend stdout and stderr to log files in the script directory.
+  // Overwrite existing logs on each launch to avoid unbounded growth.
+  std::string full_command =
+      command + " >backend_stdout.log 2>backend_stderr.log & echo $!";
 
   FILE* pipe = popen(full_command.c_str(), "r");
   if (!pipe) {
@@ -157,12 +199,21 @@ BackendInterface::videoAddNewPointsOrBox(
 
   try {
     auto j = nlohmann::json::parse(resp);
+
+    // Check if response contains an error
+    if (j.contains("error")) {
+      std::cerr << "Backend error: " << j["error"].get<std::string>()
+                << std::endl;
+      return result;
+    }
+
     result.out_obj_ids = j.at("out_obj_ids").get<std::vector<int>>();
     result.out_masks =
         j.at("out_masks").get<std::vector<std::vector<std::vector<bool>>>>();
   } catch (const std::exception& e) {
     std::cerr << "Failed to parse /video/add_new_points_or_box response: "
               << e.what() << std::endl;
+    std::cerr << "Response was: " << resp << std::endl;
   }
 
   return result;
@@ -205,26 +256,46 @@ BackendInterface::videoPropagateInVideo(const VideoPropagateRequest& request) {
   try {
     auto j = nlohmann::json::parse(resp);
 
-    // video_segments: map<int, map<int, vector<vector<bool>>>>
+    // video_segments: map<int, map<int, vector<vector<vector<bool>>>>>
+    // (preserve 3D masks)
     if (j.contains("video_segments")) {
       for (auto& [frame_str, obj_dict] : j["video_segments"].items()) {
         int frame_idx = std::stoi(frame_str);
-        std::map<int, std::vector<std::vector<bool>>> inner_map;
+        std::map<int, std::vector<std::vector<std::vector<bool>>>> inner_map;
         for (auto& [obj_str, mask_val] : obj_dict.items()) {
           int obj_id = std::stoi(obj_str);
-          inner_map[obj_id] = mask_val.get<std::vector<std::vector<bool>>>();
+          if (mask_val.is_array()) {
+            inner_map[obj_id] =
+                mask_val.get<std::vector<std::vector<std::vector<bool>>>>();
+            std::cout << "is else if" << std::endl;
+          }
         }
         result.video_segments[frame_idx] = std::move(inner_map);
       }
     }
 
     if (j.contains("saved_mask_paths")) {
-      result.saved_mask_paths =
-          j["saved_mask_paths"].get<std::map<std::string, std::string>>();
+      for (auto& [frame_str, paths_json] : j["saved_mask_paths"].items()) {
+        int frame_idx = -1;
+        try {
+          frame_idx = std::stoi(frame_str);
+        } catch (...) {
+        }
+        if (frame_idx < 0) {
+          continue;
+        }
+        std::vector<std::string> paths;
+        paths = paths_json.get<std::vector<std::string>>();
+
+        result.saved_mask_paths[frame_idx] = std::move(paths);
+      }
     }
   } catch (const std::exception& e) {
     std::cerr << "Failed to parse /video/propagate_in_video response: "
               << e.what() << std::endl;
+    std::clog
+        << "[videoPropagateInVideo] Exception during parse. Response snippet: "
+        << truncateForLog(resp, 512) << std::endl;
   }
 
   return result;
@@ -337,6 +408,10 @@ std::string BackendInterface::httpGet(const std::string& endpoint,
   std::string readBuffer;
   std::string url = base_url_ + endpoint;
 
+  if (logFailures) {
+    std::clog << "[BackendInterface] HTTP GET  " << url << std::endl;
+  }
+
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(
       curl, CURLOPT_WRITEFUNCTION,
@@ -346,6 +421,7 @@ std::string BackendInterface::httpGet(const std::string& endpoint,
         return size * nmemb;
       });
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
   CURLcode res = curl_easy_perform(curl);
   if (res != CURLE_OK) {
@@ -354,8 +430,14 @@ std::string BackendInterface::httpGet(const std::string& endpoint,
     }
     readBuffer.clear();
   }
+  long status_code = 0;
+  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status_code);
 
   curl_easy_cleanup(curl);
+  if (logFailures) {
+    std::clog << "[BackendInterface] HTTP GET  " << url << " -> " << status_code
+              << " body: " << truncateForLog(readBuffer) << std::endl;
+  }
   return readBuffer;
 }
 
@@ -372,6 +454,10 @@ std::string BackendInterface::httpPost(const std::string& endpoint,
 
   struct curl_slist* headers = nullptr;
   headers = curl_slist_append(headers, "Content-Type: application/json");
+  headers = curl_slist_append(headers, "Accept: application/json");
+
+  std::clog << "[BackendInterface] HTTP POST " << url
+            << " body: " << truncateForLog(json_body) << std::endl;
 
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -385,15 +471,20 @@ std::string BackendInterface::httpPost(const std::string& endpoint,
         return size * nmemb;
       });
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
   CURLcode res = curl_easy_perform(curl);
   if (res != CURLE_OK) {
     std::cerr << "CURL POST failed: " << curl_easy_strerror(res) << std::endl;
     readBuffer.clear();
   }
+  long status_code = 0;
+  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status_code);
 
   curl_slist_free_all(headers);
   curl_easy_cleanup(curl);
+  std::clog << "[BackendInterface] HTTP POST " << url << " -> " << status_code
+            << " body: " << truncateForLog(readBuffer) << std::endl;
   return readBuffer;
 }
 

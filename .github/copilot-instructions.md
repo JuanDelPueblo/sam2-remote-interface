@@ -1,0 +1,1 @@
+Run `source ~/venv/bin/activate` before running the project

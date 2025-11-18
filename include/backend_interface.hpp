@@ -72,8 +72,9 @@ class BackendInterface {
   };
 
   struct VideoPropagateResponse {
-    std::map<int, std::map<int, std::vector<std::vector<bool>>>> video_segments;
-    std::map<std::string, std::string> saved_mask_paths;
+    std::map<int, std::map<int, std::vector<std::vector<std::vector<bool>>>>>
+        video_segments;
+    std::map<int, std::vector<std::string>> saved_mask_paths;
   };
 
   VideoPropagateResponse videoPropagateInVideo(

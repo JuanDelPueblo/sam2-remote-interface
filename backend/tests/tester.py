@@ -88,7 +88,8 @@ def wait_for_server(url, timeout=30):
 def init_video_state(video_dir):
     """Calls the /video/init_state endpoint."""
     url = f"{BASE_URL}/video/init_state"
-    response = requests.post(url, params={"video_frames_dir": video_dir})
+    payload = {"video_frames_dir": video_dir}
+    response = requests.post(url, json=payload)
     if response.status_code == 200:
         print(f"Video state initialized successfully for '{video_dir}'.")
     else:
