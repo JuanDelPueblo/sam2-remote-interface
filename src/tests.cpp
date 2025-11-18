@@ -197,7 +197,7 @@ int main() {
   }
 
   runVideoTests(backend);
-  //   runTrackingTests(backend);
+  runTrackingTests(backend);
 
   backend.stopBackend();
 

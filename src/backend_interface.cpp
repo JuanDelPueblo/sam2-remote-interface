@@ -5,6 +5,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <thread>
@@ -355,8 +356,26 @@ BackendInterface::TrackingGridResponse BackendInterface::trackingTrackGrid(
     result.message = j.value("message", "");
     result.tracks =
         j.at("tracks").get<std::vector<std::vector<std::vector<float>>>>();
-    result.visibility =
-        j.at("visibility").get<std::vector<std::vector<bool>>>();
+    // visibility can arrive as booleans or ints (0/1). Try bools first, then
+    // fallback.
+    try {
+      result.visibility =
+          j.at("visibility").get<std::vector<std::vector<bool>>>();
+    } catch (const std::exception&) {
+      try {
+        auto vis_ints = j.at("visibility").get<std::vector<std::vector<int>>>();
+        result.visibility.clear();
+        result.visibility.reserve(vis_ints.size());
+        for (const auto& row : vis_ints) {
+          std::vector<bool> brow;
+          brow.reserve(row.size());
+          for (int v : row) brow.push_back(v != 0);
+          result.visibility.push_back(std::move(brow));
+        }
+      } catch (...) {
+        // Leave visibility empty if parsing fails.
+      }
+    }
     result.num_points = j.at("num_points").get<int>();
     result.num_frames = j.at("num_frames").get<int>();
     result.output_video_path = j.value("output_video_path", "");
@@ -383,8 +402,26 @@ BackendInterface::TrackingPointsResponse BackendInterface::trackingTrackPoints(
     result.message = j.value("message", "");
     result.tracks =
         j.at("tracks").get<std::vector<std::vector<std::vector<float>>>>();
-    result.visibility =
-        j.at("visibility").get<std::vector<std::vector<bool>>>();
+    // visibility can arrive as booleans or ints (0/1). Try bools first, then
+    // fallback.
+    try {
+      result.visibility =
+          j.at("visibility").get<std::vector<std::vector<bool>>>();
+    } catch (const std::exception&) {
+      try {
+        auto vis_ints = j.at("visibility").get<std::vector<std::vector<int>>>();
+        result.visibility.clear();
+        result.visibility.reserve(vis_ints.size());
+        for (const auto& row : vis_ints) {
+          std::vector<bool> brow;
+          brow.reserve(row.size());
+          for (int v : row) brow.push_back(v != 0);
+          result.visibility.push_back(std::move(brow));
+        }
+      } catch (...) {
+        // Leave visibility empty if parsing fails.
+      }
+    }
     result.num_points = j.at("num_points").get<int>();
     result.num_frames = j.at("num_frames").get<int>();
     result.output_video_path = j.value("output_video_path", "");
@@ -542,7 +579,16 @@ std::string BackendInterface::serializeVideoPropagateRequest(
 std::string BackendInterface::serializeTrackingLoadVideoRequest(
     const TrackingLoadVideoRequest& request) {
   nlohmann::json j;
-  j["video_path"] = request.video_path;
+  std::filesystem::path input_path(request.video_path);
+  std::error_code ec;
+  std::filesystem::path abs_path = std::filesystem::absolute(input_path, ec);
+  if (!ec) {
+    // Normalize to remove redundant ./ and ../ segments.
+    j["video_path"] = abs_path.lexically_normal().string();
+  } else {
+    // Fallback: use the original value if absolute resolution failed.
+    j["video_path"] = input_path.string();
+  }
   return j.dump();
 }
 
