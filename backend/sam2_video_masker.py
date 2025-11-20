@@ -69,7 +69,7 @@ class SAM2VideoMasker:
         video_segments = {}
         for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(self.inference_state, start_frame_idx, max_frame_num_to_track, reverse):
             video_segments[out_frame_idx] = {
-                out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+                out_obj_id: (out_mask_logits[i] > 0.0).squeeze(0).cpu().numpy()
                 for i, out_obj_id in enumerate(out_obj_ids)
             }
 

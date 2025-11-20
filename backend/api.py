@@ -1,5 +1,6 @@
 from typing import Optional
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import numpy as np
 import co_tracker as cot
@@ -8,8 +9,18 @@ from utils import *
 from pathlib import Path
 from datetime import datetime
 import mediapy
+from fastapi.responses import FileResponse
+import os
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Global model instances
 video_masker: Optional[svm.SAM2VideoMasker] = None
@@ -17,6 +28,7 @@ tracker: Optional[cot.CoTracker] = None
 
 # Video state
 video_dir: Optional[str] = None
+video_frame_files: list[str] = []
 tracking_video: Optional[np.ndarray] = None
 tracking_video_path: Optional[str] = None
 
@@ -83,7 +95,7 @@ async def status():
 
 @app.post("/video/init_state")
 async def init_video_state(request: VideoInitStateRequest):
-    global video_masker, video_dir, tracker, tracking_video, tracking_video_path
+    global video_masker, video_dir, tracker, tracking_video, tracking_video_path, video_frame_files
     
     # Unload tracker if it's currently loaded
     if tracker is not None:
@@ -98,7 +110,18 @@ async def init_video_state(request: VideoInitStateRequest):
     
     video_dir = request.video_frames_dir
     video_masker.init_state(video_dir)
-    return {"message": "Video state initialized successfully"}
+    
+    # Scan for image files
+    valid_extensions = {".jpg", ".jpeg", ".png", ".bmp"}
+    video_frame_files = sorted([
+        f for f in os.listdir(video_dir)
+        if os.path.splitext(f)[1].lower() in valid_extensions
+    ])
+    
+    return {
+        "message": "Video state initialized successfully",
+        "num_frames": len(video_frame_files)
+    }
 
 @app.post("/video/reset_state")
 async def reset_video_state():
@@ -121,7 +144,7 @@ async def add_new_points_or_box(request: VideoAddPointsOrBoxRequest):
         clear_old_points=request.clear_old_points,
         box=request.box
     )
-    masks_list = [(out_mask_logits[i] > 0.0).cpu().numpy().tolist() for i in range(len(out_obj_ids))]
+    masks_list = [(out_mask_logits[i] > 0.0).squeeze(0).cpu().numpy().tolist() for i in range(len(out_obj_ids))]
     return {
         "out_obj_ids": out_obj_ids,
         "out_masks": masks_list
@@ -142,7 +165,7 @@ async def add_new_mask(request: VideoAddMaskRequest):
         mask=mask
     )
     
-    masks_list = [(out_mask_logits[i] > 0.0).cpu().numpy().tolist() for i in range(len(out_obj_ids))]
+    masks_list = [(out_mask_logits[i] > 0.0).squeeze(0).cpu().numpy().tolist() for i in range(len(out_obj_ids))]
     return {
         "frame_idx": frame_idx,
         "out_obj_ids": out_obj_ids,
@@ -319,3 +342,23 @@ async def track_points(request: TrackingPointsRequest):
         "num_frames": tracks.shape[1],
         "output_video_path": str(output_path)
     }
+
+@app.get("/video/info")
+async def get_video_info():
+    global video_frame_files
+    return {
+        "num_frames": len(video_frame_files),
+        "frame_files": video_frame_files
+    }
+
+@app.get("/video/frame/{frame_idx}")
+async def get_video_frame(frame_idx: int):
+    global video_dir, video_frame_files
+    if video_dir is None or not video_frame_files:
+        return {"error": "Video not initialized"}
+    
+    if frame_idx < 0 or frame_idx >= len(video_frame_files):
+        return {"error": "Frame index out of bounds"}
+        
+    file_path = os.path.join(video_dir, video_frame_files[frame_idx])
+    return FileResponse(file_path)
